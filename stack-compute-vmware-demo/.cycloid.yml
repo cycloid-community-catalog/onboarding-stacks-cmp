@@ -1,0 +1,35 @@
+---
+version: '4'
+name: 'VMware Virtual Machine'
+canonical: 'stack-compute-vmware-demo'
+description: This stack deploys a VMware virtual machine with a selected operating system and applications.
+author: Cycloid
+image: |
+  https://cycloid-demo-stacks-logo.s3.eu-west-1.amazonaws.com/vmware.svg
+keywords:
+- VMware
+- vCenter
+- vSphere
+- ESXi
+- provider:vmware
+technologies:
+- technology: terraform
+  version: 1.8.3
+- technology: VMware
+- technology: ESXi
+  version: "7"
+- technology: vCenter
+  version: "7"
+
+config:
+  default:
+    pipeline:
+      pipeline:
+        path: pipeline/pipeline.yml
+      variables:
+        path: pipeline/variables.sample.yml
+        destination: '($ .config_root $)/pipeline/variables.yml'
+    terraform:
+      main:
+        path: 'terraform/main.tf'
+        destination: '($ .config_root $)/terraform/main.tf'

@@ -1,0 +1,103 @@
+---
+version: "2"
+use_cases:
+- name: default
+  sections:
+  - name: Storage
+    groups:
+    - name: Storage Configuration
+      technologies: [terraform]
+      vars:
+      - name: "Bucket Name"
+        description: "Name of the GCP storage bucket to create"
+        key: bucket_name
+        widget: simple_text
+        type: string
+        required: true
+        validations:
+        - regexp: "^[a-z0-9][a-z0-9._-]{1,61}[a-z0-9]$"
+          error_message: "Must be 3-63 characters long and contain only lowercase letters, numbers, dots, hyphens, and underscores. Must start and end with a letter or number."
+
+      - name: "Storage Class"
+        description: "Storage class for the bucket"
+        key: storage_class
+        widget: dropdown
+        type: string
+        default: "STANDARD"
+        values:
+          - STANDARD
+          - NEARLINE
+          - COLDLINE
+          - ARCHIVE
+        required: true
+
+      - name: "Versioning"
+        description: "Enable versioning for the bucket"
+        key: versioning_enabled
+        widget: switch
+        type: boolean
+        default: true
+
+      - name: "Lifecycle Rules"
+        description: "Enable lifecycle rules for the bucket"
+        key: enable_lifecycle_rules
+        widget: switch
+        type: boolean
+        default: false
+
+    - name: Lifecycle Rules
+      technologies: [terraform]
+      condition: "enable_lifecycle_rules == true"
+      vars:
+      - name: "Rules"
+        description: "Lifecycle rules configuration in JSON format"
+        key: lifecycle_rules
+        widget: text_area
+        type: string
+        default: |
+          {
+            "rules": [
+              {
+                "action": {
+                  "type": "Delete",
+                  "storageClass": "ARCHIVE"
+                },
+                "condition": {
+                  "age": 365,
+                  "storageClass": "STANDARD"
+                }
+              }
+            ]
+          }
+        required: true
+
+    - name: GCP Provider Configuration
+      technologies: [pipeline]
+      vars:
+      - name: "Project ID"
+        description: "The GCP project ID where resources will be created"
+        key: gcp_project
+        widget: simple_text
+        type: string
+        required: true
+
+      - name: "Region"
+        description: "The GCP region for the provider"
+        key: gcp_region
+        widget: auto_complete
+        type: string
+        default: "europe-west1"
+        values_ref: https://cycloid-demo-stackforms-values.s3.eu-west-1.amazonaws.com/gcp-regions.json
+        required: true
+
+      - name: "GCP Credentials"
+        description: "The GCP credentials to use for deployment"
+        key: gcp_cred
+        widget: cy_cred
+        widget_config:
+          display_keys: false
+          cred_types:
+            - gcp
+        type: string
+        default: "((gcp))"
+        required: true 

@@ -1,0 +1,135 @@
+---
+version: "2"
+use_cases:
+- name: default
+  sections:
+  - name: Compute
+    groups:
+    - name: Access Configuration
+      technologies: [pipeline]
+      vars:
+      - name: "Azure credentials"
+        description: "The azure credential used to deploy the infrastructure. It contains subscription_id, tenant_id, client_id, and client_secret."
+        key: azure_cred
+        widget: cy_cred
+        widget_config:
+          display_keys: false
+          cred_types:
+            - azure
+        type: string
+        default: "((azure))"
+        required: true
+
+    - name: Virtual machine specifications
+      technologies: [terraform]
+      vars:
+      - name: "Instance Size"
+        description: "Instance size for the VM."
+        key: vm_instance_type
+        widget: dropdown
+        type: string
+        default: "Standard_DS2_v2"
+        values_ref: https://cycloid-demo-stackforms-values.s3.eu-west-1.amazonaws.com/azure-instance-sizes.json
+        required: true
+
+      - name: "Disk size"
+        unit: Go
+        description: "Disk size for the VM."
+        key: vm_disk_size
+        widget: slider_range
+        type: integer
+        default: 30
+        values:
+            - 30
+            - 250
+        required: true
+
+      - name: "Ingress TCP ports"
+        description: "Ingress TCP ports allowed from the internet. Type any ports as needed."
+        key: vm_ports_in
+        widget: text_area
+        type: array
+        default:
+        - 22
+        - 80
+        - 443
+
+      - name: "Azure location"
+        description: "Azure location where to create resources."
+        key: azure_location
+        widget: dropdown
+        values_ref: https://cycloid-demo-stackforms-values.s3.eu-west-1.amazonaws.com/azure-locations.json
+        type: string
+        default: "West Europe"
+        required: true
+
+      - name: "Create or Select Resource Group"
+        description: "Whether to create a new Resource group or select existing ones."
+        key: res_selector
+        widget: dropdown
+        type: map
+        required: true
+        default: "Create new"
+        values:
+        - {"label": "Create new", "value": "create"}
+        - {"label": "Select from Asset Inventory", "value": "inventory"}
+        - {"label": "Enter manually", "value": "manual"}
+
+    - name: Select from Asset Inventory
+      technologies: [terraform]
+      condition: '$res_selector == "Select from Asset Inventory"'
+      vars:
+      - name: "Existing Resource Group Name"
+        description: "The name of the existing resource group where the resources will be deployed."
+        key: resource_group_name_inventory
+        widget: cy_inventory_resource
+        widget_config:
+          attribute: name
+          filters:
+            type: azurerm_resource_group
+        type: string
+        required: true
+
+    - name: Enter manually
+      technologies: [terraform]
+      condition: '$res_selector == "Enter manually"'
+      vars:
+      - name: "Resource Group Name"
+        description: "The name of the existing resource group where the resources will be deployed."
+        key: resource_group_name_manual
+        widget: simple_text
+        type: string
+        required: true
+
+    - name: Applications
+      technologies: [pipeline]
+      vars:
+      - name: "Install K3s"
+        description: "Whether to install K3s or not."
+        key: install_k3s
+        widget: switch
+        type: boolean
+        default: true
+        required: true
+
+    - name: Day-2 Operations
+      technologies: [pipeline]
+      vars:
+      - name: "Instance status"
+        description: "Status for the deployed instances."
+        key: vm_instance_status
+        widget: radios
+        type: string
+        default: "Started"
+        values:
+            - "Started"
+            - "Stopped"
+        required: true
+
+      - name: "Destroy Timer"
+        description: "The number of minutes to wait before automatically destroying the infrastructure after creation."
+        key: destroy_timer_in_minutes
+        widget: number
+        type: integer
+        default: 60
+        required: true

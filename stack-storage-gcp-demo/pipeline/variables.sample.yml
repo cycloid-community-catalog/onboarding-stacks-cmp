@@ -1,0 +1,24 @@
+#
+# Cloud Provider
+#
+
+#. gcp_cred (required): ((gcp))
+#+ The GCP credential used to deploy the infrastructure. It contains project_id, client_email, and private_key. See value format [here](https://docs.cycloid.io/advanced-guide/integrate-and-use-cycloid-credentials-manager.html#vault-in-the-pipeline)
+gcp_cred: ((gcp))
+
+#. gcp_project (required): ""
+#+ Google Cloud Platform project ID for Terraform.
+gcp_project: ""
+
+#. gcp_region (required): "europe-west1"
+#+ Google Cloud Platform region to use for Terraform.
+gcp_region: "europe-west1"
+
+
+#
+# Default variables
+#
+
+#. terraform_version (required): '1.8.3'
+#+ terraform version used to execute your code.
+terraform_version: '1.8.3' 

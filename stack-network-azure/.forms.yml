@@ -1,0 +1,66 @@
+---
+version: "2"
+use_cases:
+- name: default
+  sections:
+  - name: Azure Network Landing Zone
+    groups:
+    - name: Azure Cloud Configuration
+      technologies: [pipeline]
+      vars:
+      - name: "Azure Credentials"
+        description: "The azure credential used to deploy the infrastructure. It contains subscription_id, tenant_id, client_id, and client_secret."
+        key: azure_cred
+        widget: cy_cred
+        widget_config:
+          display_keys: false
+          cred_types:
+            - azure
+        type: string
+        default: "((azure))"
+        required: true
+    - name: Resource Group
+      technologies: [terraform]
+      vars:
+      - name: "New Resource Group"
+        description: "The name of the resource group to create in the location mentionned above. The Networking resources will be created in this Resource Group."
+        key: resource_group_name
+        widget: simple_text
+        type: string
+        default: "cycloid"
+        validations: 
+        - regexp: "^[-\\w\\._\\(\\)]+$"
+          error_message: "Please enter a valid Azure Resource Group such as MyResourceGroup"
+        required: true
+      - name: "Azure Location"
+        description: "Azure location where to create Resource Group and Networking resources."
+        key: azure_location
+        widget: auto_complete
+        type: string
+        values_ref: https://cycloid-demo-stackforms-values.s3.eu-west-1.amazonaws.com/azure-locations.json
+        default: "West Europe"
+        required: true
+        
+    - name: Network Configuration
+      technologies: [terraform]
+      vars:
+      - name: "Virtual Network CIDR"
+        description: "The CIDR of the Virtual Network to create."
+        key: network_cidr
+        widget: simple_text
+        type: string
+        default: "10.0.0.0/16"
+        validations: 
+        - regexp: "^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\/[0-9]{1,2}$" 
+          error_message: "Please enter a valid CIDR such as 10.0.0.0/16"
+        required: true
+      - name: "Subnet CIDR"
+        description: "The CIDR of the Subnet."
+        key: subnet_cidr
+        widget: simple_text
+        type: string
+        default: "10.0.0.0/24"
+        validations: 
+        - regexp: "^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\/[0-9]{1,2}$" 
+          error_message: "Please enter a valid CIDR such as 10.0.0.0/24"
+        required: true

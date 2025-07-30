@@ -1,0 +1,268 @@
+resource_types:
+- name: terraform
+  type: registry-image
+  source:
+    repository: cycloid/terraform-resource
+    tag: ((terraform_version))
+
+
+resources:
+- name: tfstate
+  type: terraform
+  icon: terraform
+  source:
+    env_name: ($ .env $)
+    backend_type: http
+    backend_config:
+      address: '($ .api_url $)/inventory?jwt=($ .inventory_jwt $)'
+    vars:
+      aws_cred: ((aws_cred))
+      aws_region: ((aws_region))
+      install_k3s: ((install_k3s))
+      cy_api_key: ((cy_api_key))
+      cy_api_url: ($ .api_url $)
+      cy_org: ($ .org $)
+      cy_project: ($ .project $)
+      cy_env: ($ .env $)
+      cy_component: ($ .component $)
+
+
+# The Terraform stack (will be merged with the config)
+- name: git_stack-terraform
+  type: git
+  icon: github-circle
+  source:
+    uri: ($ .scs_url $)
+    branch: ($ .scs_branch $)
+    ($- if eq .scs_cred_type "basic_auth" $)
+    username: ((($ .scs_cred_path $).username))
+    password: ((($ .scs_cred_path $).password))
+    ($- end $)
+    ($- if eq .scs_cred_type "ssh" $)
+    private_key: ((($ .scs_cred_path $).ssh_key))
+    ($- end $)
+    paths:
+      - ($ .stack_path $)/terraform/*
+
+# The Terraform config (will be merged with the stack)
+- name: git_config-terraform
+  type: git
+  icon: github-circle
+  source:
+    uri: ($ .cr_url $)
+    branch: ($ .cr_branch $)
+    ($- if eq .cr_cred_type "basic_auth" $)
+    username: ((($ .cr_cred_path $).username))
+    password: ((($ .cr_cred_path $).password))
+    ($- end $)
+    ($- if eq .cr_cred_type "ssh" $)
+    private_key: ((($ .cr_cred_path $).ssh_key))
+    ($- end $)
+    paths:
+      - ($ .config_root $)/terraform/*
+
+
+groups:
+- name: overview
+  jobs:
+    - deploy
+    - run-operations
+
+- name: destroy
+  jobs:
+    - destroy
+
+
+jobs:
+  - name: deploy
+    serial: true
+    max_in_flight: 1
+    build_logs_to_retain: 10
+    plan:
+      - in_parallel:
+        - get: git_stack-terraform
+          trigger: true
+        - get: git_config-terraform
+          trigger: true
+
+      - task: merge-stack-and-config
+        config:
+          platform: linux
+          image_resource:
+            type: registry-image
+            source:
+              repository: cycloid/cycloid-toolkit
+              tag: latest
+          run:
+            path: /usr/bin/merge-stack-and-config
+          inputs:
+          - name: git_config-terraform
+            path: "config"
+          - name: git_stack-terraform
+            path: "stack"
+          outputs:
+          - name: merged-stack
+            path: "merged-stack"
+        params:
+          CONFIG_PATH: ($ .config_root $)/terraform
+          STACK_PATH: ($ .stack_path $)/terraform
+
+      - put: tfstate
+        params:
+          terraform_source: merged-stack/
+
+
+  - name: run-operations
+    serial: true
+    max_in_flight: 1
+    build_logs_to_retain: 10
+    plan:
+      - in_parallel:
+        - get: tfstate
+          trigger: true
+          passed:
+            - deploy
+
+      - task: store-kubeconfig
+        config:
+          platform: linux
+          image_resource:
+            type: registry-image
+            source:
+              repository: cycloid/cycloid-toolkit
+              tag: latest
+          run:
+            path: /bin/bash
+            args:
+              - '-c'
+              - |
+                if [[ "$INSTALL_K3S" == "true" ]]; then
+                  echo "Saving kubeconfig in Credential ${PROJECT}-${ENV}-kubeconfig"
+                  export INSTANCE_ID=$(cat tfstate/metadata | jq -r .instance_id)
+                  export AWS_ACCESS_KEY_ID=$(echo ${CY_AWS_CRED} | jq -r .access_key)
+                  export AWS_SECRET_ACCESS_KEY=$(echo ${CY_AWS_CRED} | jq -r .secret_key)
+                  export AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION:-us-east-1}
+                  export TERM=xterm
+                  touch kubeconfig
+                  until grep apiVersion kubeconfig; do
+                    echo "Waiting for kubeconfig..."
+                    sleep 1
+                    aws ssm start-session --target ${INSTANCE_ID} \
+                    --document-name AmazonEKS-ExecuteNonInteractiveCommand \
+                    --parameters 'command="cat /home/admin/.kube/public_ip_config"' | tail -n +3 | head -n -3  >kubeconfig
+                  done
+
+                  if ! cy credential create --name "${PROJECT}-${ENV}-kubeconfig" --canonical "${PROJECT}-${ENV}-kubeconfig" custom --field-file kubeconfig=kubeconfig; then
+                    echo "Error: cy returned code $?. Trying to update it."
+                    if ! cy credential update --name "${PROJECT}-${ENV}-kubeconfig" --canonical "${PROJECT}-${ENV}-kubeconfig" custom --field-file kubeconfig=kubeconfig; then
+                        echo "Error: cy returned code $?"
+                        exit 1
+                    fi
+                  fi
+                else
+                  echo "K3s not installed. Skipping..."
+                fi
+          inputs:
+          - name: tfstate
+            path: tfstate
+        params:
+          CY_AWS_CRED: '((aws_cred))'
+          AWS_DEFAULT_REGION: '((aws_region))'
+          INSTALL_K3S: ((install_k3s))
+          CY_ORG: ($ .organization_canonical $)
+          CY_API_URL: ($ .api_url $)
+          CY_API_KEY: ((cy_api_key))
+          PROJECT: ($ .project $)
+          ENV: ($ .environment $)
+
+      - task: run-cli-operations
+        config:
+          platform: linux
+          image_resource:
+            type: registry-image
+            source:
+              repository: amazon/aws-cli
+              tag: latest
+          run:
+            path: /bin/bash
+            args:
+              - '-c'
+              - |
+                yum install jq -y >/dev/null
+                export instance_id=$(cat tfstate/metadata | jq -r .instance_id)
+                export AWS_ACCESS_KEY_ID=$(echo ${CY_AWS_CRED} | jq -r .access_key)
+                export AWS_SECRET_ACCESS_KEY=$(echo ${CY_AWS_CRED} | jq -r .secret_key)
+                export AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION}
+                export TERM=xterm
+                if [[ "$vm_instance_status" == "Started" ]]; then
+                  echo "Starting instance ${instance_id}..."
+                  aws ec2 start-instances --instance-ids ${instance_id}
+                elif [[ "$vm_instance_status" == "Stopped" ]]; then
+                  echo "Stopping instance ${instance_id}..."
+                  aws ec2 stop-instances --instance-ids ${instance_id}
+                fi
+          inputs:
+          - name: tfstate
+            path: tfstate
+        params:
+          vm_instance_status: '((vm_instance_status))'
+          CY_AWS_CRED: '((aws_cred))'
+          AWS_DEFAULT_REGION: '((aws_region))'
+
+
+  - name: destroy
+    max_in_flight: 1
+    build_logs_to_retain: 10
+    plan:
+      - in_parallel:
+        - get: git_stack-terraform
+          trigger: false
+        - get: git_config-terraform
+          trigger: false
+        - get: tfstate
+          trigger: true
+
+      - task: timer-before-destroy
+        config:
+          platform: linux
+          image_resource:
+            type: registry-image
+            source:
+              repository: cycloid/cycloid-toolkit
+          run:
+            path: /bin/bash
+            args:
+              - '-ec'
+              - |
+                sleep ${destroy_timer_in_minutes}m
+        params:
+          destroy_timer_in_minutes: ((destroy_timer_in_minutes))
+
+      - task: merge-stack-and-config
+        config:
+          platform: linux
+          image_resource:
+            type: registry-image
+            source:
+              repository: cycloid/cycloid-toolkit
+              tag: latest
+          run:
+            path: /usr/bin/merge-stack-and-config
+          inputs:
+          - name: git_config-terraform
+            path: "config"
+          - name: git_stack-terraform
+            path: "stack"
+          outputs:
+          - name: merged-stack
+            path: "merged-stack"
+        params:
+          CONFIG_PATH: ($ .config_root $)/terraform
+          STACK_PATH: ($ .stack_path $)/terraform
+
+      - put: tfstate
+        params:
+          action: destroy
+          terraform_source: merged-stack/
+        get_params:
+          action: destroy

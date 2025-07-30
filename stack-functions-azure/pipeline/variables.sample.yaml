@@ -1,0 +1,29 @@
+#
+# Cloud Provider
+#
+
+#. azure_cred (required): ((azure))
+#+ The azure credential used to deploy the infrastructure. It contains subscription_id, tenant_id, client_id, and client_secret. See value format [here](https://docs.cycloid.io/advanced-guide/integrate-and-use-cycloid-credentials-manager.html#vault-in-the-pipeline)
+azure_cred: ((azure))
+
+
+#
+# Azure Function
+#
+
+#. git_func_url (required): ""
+#+ The git repository URL where the azure function to deploy is located
+git_func_url: ""
+
+#. git_func_branch (required): ""
+#+ The git repository branch where the azure function to deploy is located
+git_func_branch: ""
+
+
+#
+# Default variables
+#
+
+#. terraform_version (required): '1.8.3'
+#+ terraform version used to execute your code.
+terraform_version: '1.8.3'

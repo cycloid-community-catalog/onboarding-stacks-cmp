@@ -1,0 +1,31 @@
+---
+# Configuration of the Cycloid stack
+version: '4'
+name: 'Compute Instance'
+canonical: stack-compute-aws-demo
+author: Cycloid
+description: |
+  Deploys an AWS EC2 instance using Terraform.
+image: |
+  https://cycloid-demo-stacks-logo.s3.eu-west-1.amazonaws.com/aws-ec2.svg
+keywords:
+  - ec2
+  - virtual machine
+  - instance
+  - provider:aws
+technologies:
+- technology: terraform
+  version: 1.8.3
+
+config:
+  default:
+    pipeline:
+      pipeline:
+        path: pipeline/pipeline.yml
+      variables:
+        path: pipeline/variables.sample.yml
+        destination: '($ .config_root $)/pipeline/variables.yml'
+    terraform:
+      main:
+        path: 'terraform/main.tf'
+        destination: '($ .config_root $)/terraform/main.tf'

@@ -1,0 +1,31 @@
+---
+# Configuration of the Cycloid stack
+version: '4'
+name: 'AWS S3 Bucket'
+canonical: stack-storage-aws-demo
+author: Cycloid
+description: |
+  Deploy and manage AWS S3 buckets with configurable settings and lifecycle policies.
+image: |
+  https://cycloid-demo-stacks-logo.s3.eu-west-1.amazonaws.com/aws-s3.svg
+keywords:
+  - s3
+  - storage
+  - aws
+  - provider:aws
+technologies:
+- technology: terraform
+  version: 1.8.3
+
+config:
+  default:
+    pipeline:
+      pipeline:
+        path: pipeline/pipeline.yml
+      variables:
+        path: pipeline/variables.sample.yml
+        destination: '($ .config_root $)/pipeline/variables.yml'
+    terraform:
+      main:
+        path: 'terraform/main.tf'
+        destination: '($ .config_root $)/terraform/main.tf' 

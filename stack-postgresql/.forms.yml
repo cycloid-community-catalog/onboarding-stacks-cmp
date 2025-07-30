@@ -1,0 +1,405 @@
+---
+version: "2"
+use_cases:
+- name: aws
+  sections:
+  - name: Amazon Relational Database Service (RDS)
+    groups:
+    - name: Access Configuration
+      technologies: [pipeline]
+      vars:
+      - name: "AWS Account"
+        description: "The AWS account where to deploy the infrastructure."
+        key: aws_cred
+        widget: cy_cred
+        widget_config:
+          display_keys: false
+          cred_types:
+            - aws
+        type: string
+        default: "((aws))"
+        required: true
+      - name: "AWS Region"
+        description: "AWS region where to deploy the resources."
+        key: aws_region
+        widget: auto_complete
+        type: string
+        values_ref: https://cycloid-demo-stackforms-values.s3.eu-west-1.amazonaws.com/aws-regions.json
+        default: eu-west-1
+        validations: 
+        - regexp: "^[a-z]{2}-[a-z]+-\\d+$" 
+          error_message: "Please enter a valid AWS region such as us-east-1"
+        required: true
+
+    - name: RDS Configuration
+      technologies: [terraform]
+      vars:
+      - name: "PostgreSQL Engine Version"
+        description: "Version of the PostgreSQL engine."
+        key: rds_engine_version
+        widget: auto_complete
+        type: string
+        default: "17.4"
+        values: ["17.4","17.3","17.2","17.1","16.8","16.7","16.6","16.5","16.4","16.3","16.2","16.1","16.0"]
+        required: true
+      - name: "Instance Class"
+        description: "Instance class for the RDS instance."
+        key: rds_instance_class
+        widget: slider_list
+        type: string
+        default: "db.t4g.small"
+        values:
+            - "db.t4g.micro"
+            - "db.t4g.small"
+            - "db.t4g.medium"
+        required: true
+      - name: "Allocated Storage"
+        unit: Go
+        description: "The amount of allocated storage."
+        key: rds_allocated_storage
+        widget: slider_range
+        type: integer
+        default: 20
+        values:
+            - 10
+            - 100
+        required: true
+      # - name: "Snapshot Identifier"
+      #   description: "(Optional) Specifies whether or not to create this database from a snapshot. This corresponds to the snapshot ID you'd find in the RDS console, e.g: rds:production-2015-06-26-06-05."
+      #   key: rds_snapshot_identifier
+      #   widget: simple_text
+      #   type: string
+      #   required: false
+      # - name: "Security Group"
+      #   description: "The application security group to grant access to the database."
+      #   key: app_security_group_id
+      #   type: "string"
+      #   widget: cy_inventory_resource
+      #   widget_config:
+      #     attribute: id
+      #     filters:
+      #       type: aws_security_group
+
+      - name: "Create or Select Subnet"
+        description: "Whether to create a new VPC and Subnet or select an existing Subnet."
+        key: res_selector
+        widget: dropdown
+        type: map
+        required: true
+        default: "Create new"
+        values:
+        - {"label": "Create new", "value": "create"}
+        - {"label": "Select from Asset Inventory", "value": "inventory"}
+
+    - name: Select from Asset Inventory
+      technologies: [terraform]
+      condition: '$res_selector == "Select from Asset Inventory"'
+      vars:
+      - name: "Subnet"
+        description: "Subnets where to deploy the resources. Make sure you select at least 2 subnets from different AZ but in the same region."
+        key: rds_subnet_ids_inventory
+        widget: cy_inventory_resource
+        widget_config:
+          attribute: id
+          filters:
+            type: aws_subnet
+            attributes: 'availability_zone[rlike]=${aws_region}*'
+        validations:
+          - array:
+              min_elems: 2
+            error_message: "At least two subnets must be selected"
+        type: array
+        required: true
+
+    - name: Day-2 Operations
+      technologies: [pipeline]
+      vars:
+      - name: "Destroy Timer"
+        description: "The number of minutes to wait before automatically destroying the infrastructure after creation."
+        key: destroy_timer_in_minutes
+        widget: number
+        type: integer
+        default: 60
+        required: true
+
+
+- name: azure
+  sections:
+  - name: Database
+    groups:
+    - name: Access Configuration
+      technologies: [pipeline]
+      vars:
+      - name: "Azure credentials"
+        description: "The azure credential used to deploy the infrastructure. It contains subscription_id, tenant_id, client_id, and client_secret."
+        key: azure_cred
+        widget: cy_cred
+        widget_config:
+          display_keys: false
+          cred_types:
+            - azure
+        type: string
+        default: "((azure))"
+        required: true
+
+    - name: Database Configuration
+      technologies: [terraform]
+      vars:
+      - name: "Server Name"
+        description: "Name of the PostgreSQL Flexible Server."
+        key: server_name
+        widget: simple_text
+        type: string
+        default: "($ .project $)-($ .env $)-postgresql"
+        required: true
+      - name: "PostgreSQL Version"
+        description: "Version of PostgreSQL to use."
+        key: postgresql_version
+        widget: dropdown
+        type: string
+        default: "14"
+        values: ["14","13","12","11"]
+        required: true
+      - name: "SKU Name"
+        description: "SKU name for the PostgreSQL Flexible Server."
+        key: sku_name
+        widget: auto_complete
+        type: string
+        values:
+        - "B_Standard_B1ms"
+        - "B_Standard_B2s"
+        - "B_Standard_B2ms"
+        default: "B_Standard_B1ms"
+        required: true
+      - name: "Storage Size"
+        description: "Storage size in MB."
+        key: storage_mb
+        widget: dropdown
+        type: map
+        default: "32 GB"
+        values:
+        - {"label": "32 GB", "value": 32768}
+        - {"label": "64 GB", "value": 65536}
+        - {"label": "128 GB", "value": 131072}
+        - {"label": "256 GB", "value": 262144}
+        - {"label": "512 GB", "value": 524288}
+        - {"label": "1 TB", "value": 1048576}
+        required: true
+      - name: "Backup Retention Days"
+        description: "Backup retention days."
+        key: backup_retention_days
+        widget: number
+        type: integer
+        default: 7
+        required: true
+      - name: "Enable Geo-Redundant Backups"
+        description: "Enable geo-redundant backups."
+        key: geo_redundant_backup_enabled
+        widget: switch
+        type: boolean
+        default: false
+        required: true
+      - name: "Administrator Login"
+        description: "Administrator login for PostgreSQL server."
+        key: administrator_login
+        widget: simple_text
+        type: string
+        default: "psqladmin"
+        required: true
+      - name: "Database Name"
+        description: "Name of the database to create."
+        key: database_name
+        widget: simple_text
+        type: string
+        default: "($ .project $)($ .env $)postgresql"
+        validations:
+          - regexp: "^[a-z0-9]+$"
+            error_message: "Must begin with a letter and contain alphanumeric chars"
+        required: true
+      - name: "Azure Location"
+        description: "Azure location."
+        key: azure_location
+        widget: auto_complete
+        type: string
+        values_ref: https://cycloid-demo-stackforms-values.s3.eu-west-1.amazonaws.com/azure-locations.json
+        default: "West Europe"
+        required: true
+      - name: "Create or Select Resource Group"
+        description: "Whether to create a new Resource group or select existing ones."
+        key: res_selector
+        widget: dropdown
+        type: map
+        required: true
+        default: "Create new"
+        values:
+        - {"label": "Create new", "value": "create"}
+        - {"label": "Select from Asset Inventory", "value": "inventory"}
+        - {"label": "Enter manually", "value": "manual"}
+    - name: Select from Asset Inventory
+      technologies: [terraform]
+      condition: '$res_selector == "Select from Asset Inventory"'
+      vars:
+      - name: "Existing Resource Group Name"
+        description: "The name of the existing resource group where the resources will be deployed."
+        key: resource_group_name_inventory
+        widget: cy_inventory_resource
+        widget_config:
+          attribute: name
+          filters:
+            type: azurerm_resource_group
+        type: string
+        required: true
+    - name: Enter manually
+      technologies: [terraform]
+      condition: '$res_selector == "Enter manually"'
+      vars:
+      - name: "Resource Group Name"
+        description: "The name of the existing resource group where the resources will be deployed."
+        key: resource_group_name_manual
+        widget: simple_text
+        type: string
+        required: true
+
+    - name: Day-2 Operations
+      technologies: [pipeline]
+      vars:
+      - name: "Destroy Timer"
+        description: "The number of minutes to wait before automatically destroying the infrastructure after creation."
+        key: destroy_timer_in_minutes
+        widget: number
+        type: integer
+        default: 60
+        required: true
+
+
+- name: gcp
+  sections:
+  - name: Google Cloud SQL for PostgreSQL
+    groups:
+    - name: Access Configuration
+      technologies: [pipeline]
+      vars:
+      - name: "GCP Credentials"
+        description: "The GCP credentials to deploy the infrastructure."
+        key: gcp_cred
+        widget: cy_cred
+        widget_config:
+          display_keys: false
+          cred_types:
+            - gcp
+        type: string
+        default: "((gcp))"
+        required: true
+      - name: "GCP Project"
+        description: "The GCP project ID."
+        key: gcp_project
+        widget: simple_text
+        type: string
+        required: true
+      - name: "GCP Region"
+        description: "GCP region for Cloud SQL."
+        key: gcp_region
+        widget: dropdown
+        type: string
+        values_ref: https://cycloid-demo-stackforms-values.s3.eu-west-1.amazonaws.com/gcp-regions.json
+        default: "europe-west1"
+        required: true
+      - name: "GCP Zone"
+        description: "GCP zone for Cloud SQL."
+        key: gcp_zone
+        widget: dropdown
+        type: string
+        values_ref: https://cycloid-demo-stackforms-values.s3.eu-west-1.amazonaws.com/gcp-zones-${gcp_region}.json
+        default: "europe-west1-b"
+        required: true
+
+    - name: Cloud SQL Configuration
+      technologies: [terraform]
+      vars:
+      - name: "Instance Name"
+        description: "Name of the Cloud SQL instance."
+        key: instance_name
+        widget: simple_text
+        type: string
+        default: "($ .project $)-($ .env $)-postgresql"
+        required: true
+      - name: "PostgreSQL Version"
+        description: "PostgreSQL version."
+        key: postgresql_version 
+        widget: dropdown
+        type: string
+        values: ["POSTGRES_14", "POSTGRES_13", "POSTGRES_12"]
+        default: "POSTGRES_14"
+        required: true
+      - name: "Machine Type"
+        description: "Cloud SQL machine type."
+        key: machine_type
+        widget: simple_text
+        type: string
+        default: "db-f1-micro"
+        required: true
+      - name: "Disk Size (GB)"
+        description: "Disk size in GB."
+        key: disk_size
+        widget: number
+        type: integer
+        default: 10
+        required: true
+      - name: "Disk Type"
+        description: "Disk type (PD_SSD or PD_HDD)."
+        key: disk_type
+        widget: dropdown
+        type: string
+        values: ["PD_SSD", "PD_HDD"]
+        default: "PD_SSD"
+        required: true
+      - name: "Database Name"
+        description: "Name of the database to create."
+        key: database_name
+        widget: simple_text
+        type: string
+        required: true
+      - name: "Database User"
+        description: "Database user name."
+        key: database_user
+        widget: simple_text
+        type: string
+        required: true
+      - name: "VPC Network"
+        description: "VPC network to connect to."
+        key: vpc_network
+        widget: simple_text
+        type: string
+        required: false
+      - name: "Backup Retention Days"
+        description: "Backup retention period."
+        key: backup_retention_days
+        widget: number
+        type: integer
+        default: 7
+        required: true
+      - name: "Max Connections"
+        description: "Maximum number of connections."
+        key: max_connections
+        widget: number
+        type: integer
+        default: 100
+        required: true
+      - name: "Deletion Protection"
+        description: "Enable deletion protection."
+        key: deletion_protection
+        widget: switch
+        type: boolean
+        default: false
+        required: true
+
+    - name: Day-2 Operations
+      technologies: [pipeline]
+      vars:
+      - name: "Destroy Timer"
+        description: "The number of minutes to wait before automatically destroying the infrastructure after creation."
+        key: destroy_timer_in_minutes
+        widget: number
+        type: integer
+        default: 60
+        required: true

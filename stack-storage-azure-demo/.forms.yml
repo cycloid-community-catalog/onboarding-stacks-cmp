@@ -1,0 +1,140 @@
+---
+version: "2"
+use_cases:
+- name: default
+  sections:
+  - name: Storage
+    groups:
+    - name: Storage Configuration
+      technologies: [terraform]
+      vars:
+      - name: "Storage Account Name"
+        description: "Name of the Azure storage account to create"
+        key: storage_account_name
+        widget: simple_text
+        type: string
+        required: true
+        validations:
+        - regexp: "^[a-z0-9]{3,24}$"
+          error_message: "Must be 3 to 24 alphanumeric characters."
+
+      - name: "Azure Location"
+        description: "Azure region to deploy the storage account"
+        key: azure_location
+        widget: auto_complete
+        type: string
+        default: "West Europe"
+        values_ref: https://cycloid-demo-stackforms-values.s3.eu-west-1.amazonaws.com/azure-locations.json
+        required: true 
+        
+      - name: "Account Tier"
+        description: "The tier of the storage account"
+        key: account_tier
+        widget: dropdown
+        type: string
+        default: "Standard"
+        values:
+          - "Standard"
+          - "Premium"
+        required: true
+
+      - name: "Replication Type"
+        description: "The replication type for the storage account"
+        key: replication_type
+        widget: dropdown
+        type: string
+        default: "LRS"
+        values:
+          - "LRS"
+          - "GRS"
+          - "RAGRS"
+          - "ZRS"
+        required: true
+
+      - name: "Enable HTTPS Only"
+        description: "Forces HTTPS traffic only"
+        key: https_traffic_only_enabled
+        widget: switch
+        type: boolean
+        default: true
+
+      - name: "Create Containers"
+        description: "Create containers in the storage account"
+        key: create_containers
+        widget: switch
+        type: boolean
+        default: false
+
+    - name: Containers
+      technologies: [terraform]
+      condition: "create_containers == true"
+      vars:
+      - name: "Containers"
+        description: "List of containers to create in the storage account"
+        key: containers
+        widget: text_area
+        type: string
+        default: |
+          [
+            {
+              "name": "data",
+              "access_type": "private"
+            }
+          ]
+        required: true
+
+    - name: Resource Group
+      technologies: [terraform]
+      vars:
+      - name: "Create or Select Resource Group"
+        description: "Whether to create a new Resource group or select existing ones."
+        key: res_selector
+        widget: dropdown
+        type: map
+        required: true
+        default: "Create new"
+        values:
+        - {"label": "Create new", "value": "create"}
+        - {"label": "Select from Asset Inventory", "value": "inventory"}
+        - {"label": "Enter manually", "value": "manual"}
+
+    - name: Select from Asset Inventory
+      technologies: [terraform]
+      condition: '$res_selector == "Select from Asset Inventory"'
+      vars:
+      - name: "Existing Resource Group Name"
+        description: "The name of the existing resource group where the resources will be deployed."
+        key: resource_group_name_inventory
+        widget: cy_inventory_resource
+        widget_config:
+          attribute: name
+          filters:
+            type: azurerm_resource_group
+        type: string
+        required: true
+
+    - name: Enter manually
+      technologies: [terraform]
+      condition: '$res_selector == "Enter manually"'
+      vars:
+      - name: "Resource Group Name"
+        description: "The name of the existing resource group where the resources will be deployed."
+        key: resource_group_name_manual
+        widget: simple_text
+        type: string
+        required: true
+
+    - name: Azure Credentials
+      technologies: [pipeline]
+      vars:
+      - name: "Azure Credentials"
+        description: "The Azure credentials to use for deployment"
+        key: azure_cred
+        widget: cy_cred
+        widget_config:
+          display_keys: false
+          cred_types:
+            - azure
+        type: string
+        default: "((azure))"
+        required: true

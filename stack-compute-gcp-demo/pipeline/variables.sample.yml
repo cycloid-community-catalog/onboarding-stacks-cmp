@@ -1,0 +1,41 @@
+#
+# Cloud Provider
+#
+
+#. gcp_credentials_json (required): ((gcp.json_key))
+#+ Google Cloud Platform JSON credentials to use for Terraform. See value format [here](https://docs.cycloid.io/advanced-guide/integrate-and-use-cycloid-credentials-manager.html#vault-in-the-pipeline)
+gcp_credentials_json: ((gcp.json_key))
+
+#. gcp_project (required): ""
+#+ Google Cloud Platform project ID for Terraform.
+gcp_project: ""
+
+#. gcp_region (required): "europe-west1"
+#+ Google Cloud Platform region to use for Terraform.
+gcp_region: "europe-west1"
+
+#. gcp_zone (required): "europe-west1-b"
+#+ Google Cloud Platform zone to use for Terraform.
+gcp_zone: "europe-west1-b"
+
+
+#
+# Day 2 CLI Operations
+#
+
+#. destroy_timer_in_minutes (required): 10
+#+ The number of minutes to wait before automatically destroying the infrastructure after creation.
+destroy_timer_in_minutes: 10
+
+
+#
+# Default variables
+#
+
+#. cy_api_key (required): ((admin-api-key.key))
+#+ API key to grant admin acess to Cycloid API.
+cy_api_key: ((admin-api-key.key))
+
+#. terraform_version (required): '1.8.3'
+#+ terraform version used to execute your code.
+terraform_version: '1.8.3'
