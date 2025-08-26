@@ -71,17 +71,3 @@ use_cases:
         type: boolean
         default: false
         required: true
-
-    - name: Key Pair
-      technologies: [terraform]
-      vars:
-      - name: "SSH Public key"
-        description: "The public SSH key to provision to newly created instances."
-        key: module.key_pair.key_pair_public
-        widget: simple_text
-        type: string
-        default: ""
-        validations: 
-        - regexp: "^ssh-[a-z]+\\s+[A-Za-z0-9+/=]+\\s[^\\s]+$"
-          error_message: "Please enter a valid public SSH key"
-        required: true
