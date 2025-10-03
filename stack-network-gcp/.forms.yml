@@ -5,6 +5,30 @@ use_cases:
   sections:
   - name: GCP Network Landing Zone
     groups:
+    - name: Network Configuration
+      technologies: [terraform]
+      vars:
+      - name: "Public Subnet CIDR"
+        description: "The CIDR of the Public Subnet."
+        key: public_subnet_cidr
+        widget: simple_text
+        type: string
+        default: "10.0.0.0/24"
+        validations: 
+        - regexp: "^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\/[0-9]{1,2}$" 
+          error_message: "Please enter a valid CIDR such as 10.0.0.0/24"
+        required: true
+      - name: "Private Subnet CIDR"
+        description: "The CIDR of the Private Subnet."
+        key: private_subnet_cidr
+        widget: simple_text
+        type: string
+        default: "10.0.1.0/24"
+        validations: 
+        - regexp: "^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\/[0-9]{1,2}$" 
+          error_message: "Please enter a valid CIDR such as 10.0.1.0/24"
+        required: true
+
     - name: GCP Cloud Configuration
       technologies: [pipeline]
       vars:
@@ -107,28 +131,3 @@ use_cases:
         - regexp: "^[a-z]+-[a-z0-9]+-[a-z]{1}$"
           error_message: "Please enter a valid GCP Zone such as europe-west1-b."
         required: true
-
-    - name: Network Configuration
-      technologies: [terraform]
-      vars:
-      - name: "Public Subnet CIDR"
-        description: "The CIDR of the Public Subnet."
-        key: public_subnet_cidr
-        widget: simple_text
-        type: string
-        default: "10.0.0.0/24"
-        validations: 
-        - regexp: "^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\/[0-9]{1,2}$" 
-          error_message: "Please enter a valid CIDR such as 10.0.0.0/24"
-        required: true
-      - name: "Private Subnet CIDR"
-        description: "The CIDR of the Private Subnet."
-        key: private_subnet_cidr
-        widget: simple_text
-        type: string
-        default: "10.0.1.0/24"
-        validations: 
-        - regexp: "^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\/[0-9]{1,2}$" 
-          error_message: "Please enter a valid CIDR such as 10.0.1.0/24"
-        required: true
-

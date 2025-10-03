@@ -28,13 +28,12 @@ resource "azurerm_linux_virtual_machine" "compute" {
       public_key = tls_private_key.ssh_key.public_key_openssh
   }
   
-  custom_data = base64encode(templatefile(
-    "${path.module}/userdata.sh",
-    {
-      INSTALL_K3S = var.install_k3s
-      USERNAME    = var.vm_os_user
-    }
-  ))
+  # custom_data = base64encode(templatefile(
+  #   "${path.module}/userdata.sh",
+  #   {
+  #     USERNAME    = var.vm_os_user
+  #   }
+  # ))
 
   tags = {
     Name = "${var.cy_org}-${var.cy_project}-${var.cy_env}-${var.cy_component}"

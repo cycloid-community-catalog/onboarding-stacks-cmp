@@ -5,30 +5,6 @@ use_cases:
   sections:
   - name: Compute
     groups:
-    - name: Access Configuration
-      technologies: [pipeline]
-      vars:
-      - name: "AWS Account"
-        description: "The AWS account where to deploy the infrastructure. It contains access key and secret key."
-        key: aws_cred
-        widget: cy_cred
-        widget_config:
-          display_keys: false
-          cred_types:
-            - aws
-        type: string
-        default: "((aws))"
-        required: true
-
-      - name: "AWS Region"
-        description: "AWS region to use for Terraform."
-        key: aws_region
-        widget: auto_complete
-        type: string
-        default: "eu-west-1"
-        values_ref: https://cycloid-demo-stackforms-values.s3.eu-west-1.amazonaws.com/aws-regions.json
-        required: true
-
     - name: VM Specs
       technologies: [terraform]
       vars:
@@ -114,15 +90,28 @@ use_cases:
         type: string
         required: true
 
-    - name: Applications
+    - name: Access Configuration
       technologies: [pipeline]
       vars:
-      - name: "Install K3s"
-        description: "Whether to install K3s or not."
-        key: install_k3s
-        widget: switch
-        type: boolean
-        default: true
+      - name: "AWS Account"
+        description: "The AWS account where to deploy the infrastructure. It contains access key and secret key."
+        key: aws_cred
+        widget: cy_cred
+        widget_config:
+          display_keys: false
+          cred_types:
+            - aws
+        type: string
+        default: "((aws))"
+        required: true
+
+      - name: "AWS Region"
+        description: "AWS region to use for Terraform."
+        key: aws_region
+        widget: auto_complete
+        type: string
+        default: "eu-west-1"
+        values_ref: https://cycloid-demo-stackforms-values.s3.eu-west-1.amazonaws.com/aws-regions.json
         required: true
 
     - name: Day-2 Operations

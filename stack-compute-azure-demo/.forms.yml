@@ -5,21 +5,6 @@ use_cases:
   sections:
   - name: Compute
     groups:
-    - name: Access Configuration
-      technologies: [pipeline]
-      vars:
-      - name: "Azure credentials"
-        description: "The azure credential used to deploy the infrastructure. It contains subscription_id, tenant_id, client_id, and client_secret."
-        key: azure_cred
-        widget: cy_cred
-        widget_config:
-          display_keys: false
-          cred_types:
-            - azure
-        type: string
-        default: "((azure))"
-        required: true
-
     - name: Virtual machine specifications
       technologies: [terraform]
       vars:
@@ -101,15 +86,19 @@ use_cases:
         type: string
         required: true
 
-    - name: Applications
+    - name: Access Configuration
       technologies: [pipeline]
       vars:
-      - name: "Install K3s"
-        description: "Whether to install K3s or not."
-        key: install_k3s
-        widget: switch
-        type: boolean
-        default: true
+      - name: "Azure credentials"
+        description: "The azure credential used to deploy the infrastructure. It contains subscription_id, tenant_id, client_id, and client_secret."
+        key: azure_cred
+        widget: cy_cred
+        widget_config:
+          display_keys: false
+          cred_types:
+            - azure
+        type: string
+        default: "((azure))"
         required: true
 
     - name: Day-2 Operations

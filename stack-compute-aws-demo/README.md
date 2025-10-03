@@ -29,9 +29,6 @@ The stack can be configured through the following parameters:
 - `vm_disk_size`: Disk size in GB
 - `vm_ports_in`: List of ingress TCP ports (default: [80, 443])
 
-### K3s Configuration
-- `install_k3s`: Boolean flag to control K3s installation (default: true)
-
 ### VPC Configuration
 - `res_selector`: Selection method for VPC (new or existing)
 - `vpc_id_inventory`: VPC ID from inventory

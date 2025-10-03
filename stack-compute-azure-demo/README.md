@@ -27,7 +27,6 @@ The automation can be configured through the following parameters:
 - `vm_ports_in`: List of ingress TCP ports allowed from the internet (default: ["80", "443"])
 
 ### Infrastructure Options
-- `install_k3s`: Boolean flag to control K3s installation
 - `res_selector`: Option to create new VPC or use existing one
 - `azure_location`: Azure region for resource deployment
 - `resource_group_name_inventory`: Name of existing resource group for inventory-based deployment

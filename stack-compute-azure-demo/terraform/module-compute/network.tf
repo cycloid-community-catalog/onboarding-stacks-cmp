@@ -40,23 +40,6 @@ resource "azurerm_network_security_rule" "inbound" {
   protocol                   = "Tcp"
 }
 
-resource "azurerm_network_security_rule" "ingress-k3s" {
-  count             = var.install_k3s ? 1 : 0
-
-  resource_group_name         = var.res_selector == "create" ? azurerm_resource_group.compute[0].name : data.azurerm_resource_group.selected[0].name
-  network_security_group_name = azurerm_network_security_group.compute.name
-
-  name                       = "inbound-6443"
-  direction                  = "Inbound"
-  access                     = "Allow"
-  priority                   = 150
-  source_address_prefix      = "*"
-  source_port_range          = "*"
-  destination_address_prefix = "*"
-  destination_port_range     = "6443"
-  protocol                   = "Tcp"
-}
-
 # Get a Static Public IP
 resource "azurerm_public_ip" "compute" {
   name                = "${var.cy_org}-${var.cy_project}-${var.cy_env}-${var.cy_component}"

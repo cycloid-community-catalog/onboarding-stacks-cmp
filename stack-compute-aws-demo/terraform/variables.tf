@@ -13,12 +13,6 @@ variable "aws_region" {
   default     = "eu-west-1"
 }
 
-# K3s
-variable "install_k3s" {
-  description = "Whether to install K3s or not."
-  default     = true
-}
-
 # Cycloid
 variable "cy_api_url" {
   type        = string

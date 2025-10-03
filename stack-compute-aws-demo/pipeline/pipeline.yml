@@ -18,7 +18,6 @@ resources:
     vars:
       aws_cred: ((aws_cred))
       aws_region: ((aws_region))
-      install_k3s: ((install_k3s))
       cy_api_key: ((cy_api_key))
       cy_api_url: ($ .api_url $)
       cy_org: ($ .org $)
@@ -122,58 +121,6 @@ jobs:
           trigger: true
           passed:
             - deploy
-
-      - task: store-kubeconfig
-        config:
-          platform: linux
-          image_resource:
-            type: registry-image
-            source:
-              repository: cycloid/cycloid-toolkit
-              tag: latest
-          run:
-            path: /bin/bash
-            args:
-              - '-c'
-              - |
-                if [[ "$INSTALL_K3S" == "true" ]]; then
-                  echo "Saving kubeconfig in Credential ${PROJECT}-${ENV}-kubeconfig"
-                  export INSTANCE_ID=$(cat tfstate/metadata | jq -r .instance_id)
-                  export AWS_ACCESS_KEY_ID=$(echo ${CY_AWS_CRED} | jq -r .access_key)
-                  export AWS_SECRET_ACCESS_KEY=$(echo ${CY_AWS_CRED} | jq -r .secret_key)
-                  export AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION:-us-east-1}
-                  export TERM=xterm
-                  touch kubeconfig
-                  until grep apiVersion kubeconfig; do
-                    echo "Waiting for kubeconfig..."
-                    sleep 1
-                    aws ssm start-session --target ${INSTANCE_ID} \
-                    --document-name AmazonEKS-ExecuteNonInteractiveCommand \
-                    --parameters 'command="cat /home/admin/.kube/public_ip_config"' | tail -n +3 | head -n -3  >kubeconfig
-                  done
-
-                  if ! cy credential create --name "${PROJECT}-${ENV}-kubeconfig" --canonical "${PROJECT}-${ENV}-kubeconfig" custom --field-file kubeconfig=kubeconfig; then
-                    echo "Error: cy returned code $?. Trying to update it."
-                    if ! cy credential update --name "${PROJECT}-${ENV}-kubeconfig" --canonical "${PROJECT}-${ENV}-kubeconfig" custom --field-file kubeconfig=kubeconfig; then
-                        echo "Error: cy returned code $?"
-                        exit 1
-                    fi
-                  fi
-                else
-                  echo "K3s not installed. Skipping..."
-                fi
-          inputs:
-          - name: tfstate
-            path: tfstate
-        params:
-          CY_AWS_CRED: '((aws_cred))'
-          AWS_DEFAULT_REGION: '((aws_region))'
-          INSTALL_K3S: ((install_k3s))
-          CY_ORG: ($ .organization_canonical $)
-          CY_API_URL: ($ .api_url $)
-          CY_API_KEY: ((cy_api_key))
-          PROJECT: ($ .project $)
-          ENV: ($ .environment $)
 
       - task: run-cli-operations
         config:

@@ -8,10 +8,6 @@ module "compute" {
   cy_component = var.cy_component
   #####################################
 
-  #. install_k3s: ''
-  #+ Whether to install K3s or not
-  install_k3s = var.install_k3s
-
   #. vm_instance_type: 'Standard_DS2_v2'
   #+ Instance type for the VM
   vm_instance_type = ""

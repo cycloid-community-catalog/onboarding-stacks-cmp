@@ -12,10 +12,6 @@ module "compute" {
   #+ AWS region where to deploy the resoureces
   aws_region = var.aws_region
 
-  #. install_k3s: ''
-  #+ Whether to install K3s or not
-  install_k3s = var.install_k3s
-
   #. vm_instance_type: 't3.micro'
   #+ Instance type for the VM
   vm_instance_type = ""

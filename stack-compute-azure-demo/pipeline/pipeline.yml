@@ -17,7 +17,6 @@ resources:
       address: '($ .api_url $)/inventory?jwt=($ .inventory_jwt $)'
     vars:
       azure_cred: ((azure_cred))
-      install_k3s: ((install_k3s))
       cy_api_key: ((cy_api_key))
       cy_api_url: ($ .api_url $)
       cy_org: ($ .org $)
@@ -120,57 +119,6 @@ jobs:
           trigger: true
           passed:
             - deploy
-
-      - task: store-kubeconfig
-        config:
-          platform: linux
-          image_resource:
-            type: registry-image
-            source:
-              repository: cycloid/cycloid-toolkit
-              tag: latest
-          run:
-            path: /bin/bash
-            args:
-              - '-c'
-              - |
-                if [[ "$INSTALL_K3S" == "true" ]]; then
-                  echo "Saving kubeconfig in Credential ${PROJECT}-${ENV}-kubeconfig"
-                  export VM_PUBLIC_IP=$(cat tfstate/metadata | jq -r .vm_public_ip)
-                  export VM_OS_USER=$(cat tfstate/metadata | jq -r .vm_os_user)
-                  mkdir -p ~/.ssh
-                  echo "${SSH_KEY}" >~/.ssh/git
-                  chmod 600 ~/.ssh/git
-                  eval "$(ssh-agent -s)"
-                  ssh-add ~/.ssh/git
-                  touch kubeconfig
-                  until grep apiVersion kubeconfig; do
-                    echo "Waiting for kubeconfig..."
-                    scp -o ConnectTimeout=5 ${VM_OS_USER}@${VM_PUBLIC_IP}:~/.kube/config kubeconfig
-                  done
-                  sed -i "s/127.0.0.1/${VM_PUBLIC_IP}/" kubeconfig
-
-                  if ! cy credential create --name "${PROJECT}-${ENV}-kubeconfig" --canonical "${PROJECT}-${ENV}-kubeconfig" custom --field-file kubeconfig=kubeconfig; then
-                    echo "Error: cy returned code $?. Trying to update it."
-                    if ! cy credential update --name "${PROJECT}-${ENV}-kubeconfig" --canonical "${PROJECT}-${ENV}-kubeconfig" custom --field-file kubeconfig=kubeconfig; then
-                        echo "Error: cy returned code $?"
-                        exit 1
-                    fi
-                  fi
-                else
-                  echo "K3s not installed. Skipping..."
-                fi
-          inputs:
-          - name: tfstate
-            path: tfstate
-        params:
-          INSTALL_K3S: ((install_k3s))
-          SSH_KEY: ((($ .project $)-($ .env $)-compute-ssh.ssh_key))
-          CY_ORG: ($ .organization_canonical $)
-          CY_API_URL: ($ .api_url $)
-          CY_API_KEY: ((cy_api_key))
-          PROJECT: ($ .project $)
-          ENV: ($ .environment $)
 
       - task: run-cli-operations
         config:

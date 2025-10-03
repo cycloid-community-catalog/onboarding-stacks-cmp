@@ -5,32 +5,6 @@ use_cases:
   sections:
   - name: Amazon Relational Database Service (RDS)
     groups:
-    - name: Access Configuration
-      technologies: [pipeline]
-      vars:
-      - name: "AWS Account"
-        description: "The AWS account where to deploy the infrastructure."
-        key: aws_cred
-        widget: cy_cred
-        widget_config:
-          display_keys: false
-          cred_types:
-            - aws
-        type: string
-        default: "((aws))"
-        required: true
-      - name: "AWS Region"
-        description: "AWS region where to deploy the resources."
-        key: aws_region
-        widget: auto_complete
-        type: string
-        values_ref: https://cycloid-demo-stackforms-values.s3.eu-west-1.amazonaws.com/aws-regions.json
-        default: eu-west-1
-        validations: 
-        - regexp: "^[a-z]{2}-[a-z]+-\\d+$" 
-          error_message: "Please enter a valid AWS region such as us-east-1"
-        required: true
-
     - name: RDS Configuration
       technologies: [terraform]
       vars:
@@ -111,6 +85,32 @@ use_cases:
         type: array
         required: true
 
+    - name: Access Configuration
+      technologies: [pipeline]
+      vars:
+      - name: "AWS Account"
+        description: "The AWS account where to deploy the infrastructure."
+        key: aws_cred
+        widget: cy_cred
+        widget_config:
+          display_keys: false
+          cred_types:
+            - aws
+        type: string
+        default: "((aws))"
+        required: true
+      - name: "AWS Region"
+        description: "AWS region where to deploy the resources."
+        key: aws_region
+        widget: auto_complete
+        type: string
+        values_ref: https://cycloid-demo-stackforms-values.s3.eu-west-1.amazonaws.com/aws-regions.json
+        default: eu-west-1
+        validations: 
+        - regexp: "^[a-z]{2}-[a-z]+-\\d+$" 
+          error_message: "Please enter a valid AWS region such as us-east-1"
+        required: true
+
     - name: Day-2 Operations
       technologies: [pipeline]
       vars:
@@ -127,21 +127,6 @@ use_cases:
   sections:
   - name: Database
     groups:
-    - name: Access Configuration
-      technologies: [pipeline]
-      vars:
-      - name: "Azure credentials"
-        description: "The azure credential used to deploy the infrastructure. It contains subscription_id, tenant_id, client_id, and client_secret."
-        key: azure_cred
-        widget: cy_cred
-        widget_config:
-          display_keys: false
-          cred_types:
-            - azure
-        type: string
-        default: "((azure))"
-        required: true
-
     - name: Database Configuration
       technologies: [terraform]
       vars:
@@ -260,6 +245,21 @@ use_cases:
         type: string
         required: true
 
+    - name: Access Configuration
+      technologies: [pipeline]
+      vars:
+      - name: "Azure credentials"
+        description: "The azure credential used to deploy the infrastructure. It contains subscription_id, tenant_id, client_id, and client_secret."
+        key: azure_cred
+        widget: cy_cred
+        widget_config:
+          display_keys: false
+          cred_types:
+            - azure
+        type: string
+        default: "((azure))"
+        required: true
+
     - name: Day-2 Operations
       technologies: [pipeline]
       vars:
@@ -276,43 +276,6 @@ use_cases:
   sections:
   - name: Google Cloud SQL for PostgreSQL
     groups:
-    - name: Access Configuration
-      technologies: [pipeline]
-      vars:
-      - name: "GCP Credentials"
-        description: "The GCP credentials to deploy the infrastructure."
-        key: gcp_cred
-        widget: cy_cred
-        widget_config:
-          display_keys: false
-          cred_types:
-            - gcp
-        type: string
-        default: "((gcp))"
-        required: true
-      - name: "GCP Project"
-        description: "The GCP project ID."
-        key: gcp_project
-        widget: simple_text
-        type: string
-        required: true
-      - name: "GCP Region"
-        description: "GCP region for Cloud SQL."
-        key: gcp_region
-        widget: dropdown
-        type: string
-        values_ref: https://cycloid-demo-stackforms-values.s3.eu-west-1.amazonaws.com/gcp-regions.json
-        default: "europe-west1"
-        required: true
-      - name: "GCP Zone"
-        description: "GCP zone for Cloud SQL."
-        key: gcp_zone
-        widget: dropdown
-        type: string
-        values_ref: https://cycloid-demo-stackforms-values.s3.eu-west-1.amazonaws.com/gcp-zones-${gcp_region}.json
-        default: "europe-west1-b"
-        required: true
-
     - name: Cloud SQL Configuration
       technologies: [terraform]
       vars:
@@ -391,6 +354,43 @@ use_cases:
         widget: switch
         type: boolean
         default: false
+        required: true
+
+    - name: Access Configuration
+      technologies: [pipeline]
+      vars:
+      - name: "GCP Credentials"
+        description: "The GCP credentials to deploy the infrastructure."
+        key: gcp_cred
+        widget: cy_cred
+        widget_config:
+          display_keys: false
+          cred_types:
+            - gcp
+        type: string
+        default: "((gcp))"
+        required: true
+      - name: "GCP Project"
+        description: "The GCP project ID."
+        key: gcp_project
+        widget: simple_text
+        type: string
+        required: true
+      - name: "GCP Region"
+        description: "GCP region for Cloud SQL."
+        key: gcp_region
+        widget: dropdown
+        type: string
+        values_ref: https://cycloid-demo-stackforms-values.s3.eu-west-1.amazonaws.com/gcp-regions.json
+        default: "europe-west1"
+        required: true
+      - name: "GCP Zone"
+        description: "GCP zone for Cloud SQL."
+        key: gcp_zone
+        widget: dropdown
+        type: string
+        values_ref: https://cycloid-demo-stackforms-values.s3.eu-west-1.amazonaws.com/gcp-zones-${gcp_region}.json
+        default: "europe-west1-b"
         required: true
 
     - name: Day-2 Operations

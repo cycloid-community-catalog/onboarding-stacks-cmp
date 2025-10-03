@@ -9,12 +9,6 @@ variable "azure_cred" {
   description = "The azure credential used to deploy the infrastructure. It contains subscription_id, tenant_id, client_id, and client_secret"
 }
 
-# K3s
-variable "install_k3s" {
-  description = "Whether to install K3s or not."
-  default     = true
-}
-
 # Cycloid
 variable "cy_api_url" {
   type        = string

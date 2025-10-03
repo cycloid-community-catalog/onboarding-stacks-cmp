@@ -4,12 +4,6 @@ variable "cy_project" {}
 variable "cy_env" {}
 variable "cy_component" {}
 
-# K3s
-variable "install_k3s" {
-  description = "Whether to install K3s or not."
-  default     = true
-}
-
 # Infra
 variable "vm_instance_type" {
   description = "Instance type to deploy."
