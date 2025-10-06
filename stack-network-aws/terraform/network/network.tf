@@ -2,20 +2,20 @@
 resource "aws_vpc" "vpc" {
   cidr_block = var.vpc_cidr
 
-  tags = merge(local.merged_tags, {
+  tags = {
     Name = "${var.cy_org}-${var.cy_project}-${var.cy_env}-${var.cy_component}"
     role = "vpc"
-  })
+  }
 }
 
 # Internet Gateway
 resource "aws_internet_gateway" "internet_gateway" {
   vpc_id = aws_vpc.vpc.id
 
-  tags = merge(local.merged_tags, {
+  tags = {
     Name = "${var.cy_org}-${var.cy_project}-${var.cy_env}-${var.cy_component}-ig"
     role = "internet_gateway"
-  })
+  }
 }
 
 
@@ -25,11 +25,11 @@ resource "aws_subnet" "public_subnet" {
   cidr_block = var.vpc_public_subnet
   map_public_ip_on_launch = true
 
-  tags = merge(local.merged_tags, {
+  tags = {
     Name = "${var.cy_org}-${var.cy_project}-${var.cy_env}-${var.cy_component}-public-subnet"
     role = "public_subnet"
     Tier = "Public"
-  })
+  }
 }
 
 
@@ -39,11 +39,11 @@ resource "aws_subnet" "private_subnet" {
   cidr_block = var.vpc_private_subnet
   map_public_ip_on_launch = false
 
-  tags = merge(local.merged_tags, {
+  tags = {
     Name = "${var.cy_org}-${var.cy_project}-${var.cy_env}-${var.cy_component}-private-subnet"
     role = "private_subnet"
     Tier = "Private"
-  })
+  }
 }
 
 
@@ -56,10 +56,10 @@ resource "aws_route_table" "public_route_table" {
       gateway_id = aws_internet_gateway.internet_gateway.id
   }
 
-  tags = merge(local.merged_tags, {
+  tags = {
     Name = "${var.cy_org}-${var.cy_project}-${var.cy_env}-${var.cy_component}-public-rt"
     role = "public_route_table"
-  })
+  }
 }
 
 # Associate route table with the subnet to make our subnet public
@@ -74,10 +74,10 @@ resource "aws_eip" "eip_nat_gateway" {
   
   domain   = "vpc"
 
-  tags = merge(local.merged_tags, {
+  tags = {
     Name = "${var.cy_org}-${var.cy_project}-${var.cy_env}-${var.cy_component}-eip"
     role = "eip_nat_gateway"
-  })
+  }
 }
 
 # Create a NAT gateway and allocate our EIP
@@ -87,10 +87,10 @@ resource "aws_nat_gateway" "nat_gateway" {
   allocation_id = aws_eip.eip_nat_gateway[0].id
   subnet_id = aws_subnet.public_subnet.id
 
-  tags = merge(local.merged_tags, {
+  tags = {
     Name = "${var.cy_org}-${var.cy_project}-${var.cy_env}-${var.cy_component}-nat-gw"
     role = "nat_gateway"
-  })
+  }
 }
 
 # Route table which uses our NAT gateway to access the internet
@@ -104,10 +104,10 @@ resource "aws_route_table" "private_route_table" {
       nat_gateway_id = aws_nat_gateway.nat_gateway[0].id
   }
 
-  tags = merge(local.merged_tags, {
+  tags = {
     Name = "${var.cy_org}-${var.cy_project}-${var.cy_env}-${var.cy_component}-private-rt"
     role = "private_route_table"
-  })
+  }
 }
 
 # Associate private route table with the private subnet to make NAT gateway reachable
