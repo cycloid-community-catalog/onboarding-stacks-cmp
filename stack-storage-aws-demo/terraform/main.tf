@@ -12,6 +12,4 @@ module "s3" {
   bucket_name            = "cy-${var.cy_org}-${var.cy_project}-${var.cy_env}-${var.cy_component}"
   aws_region             = "eu-west-1"
   versioning_enabled     = true
-  custom_lifecycle_rules = []
-  lifecycle_rules        = []
 } 

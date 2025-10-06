@@ -25,38 +25,6 @@ use_cases:
         type: boolean
         default: true
 
-      - name: "Custom Lifecycle Rules"
-        description: "Configure custom lifecycle rules for the bucket"
-        key: custom_lifecycle_rules
-        widget: switch
-        type: boolean
-        default: false
-
-    - name: Lifecycle Rules
-      technologies: [terraform]
-      condition: "custom_lifecycle_rules == true"
-      vars:
-      - name: "Lifecycle Rules"
-        description: "Configure lifecycle rules for the bucket"
-        key: lifecycle_rules
-        widget: text_area
-        type: string
-        default: |
-          [
-            {
-              "id": "transition-to-ia",
-              "enabled": true,
-              "prefix": "logs/",
-              "tags": {},
-              "transition": [
-                {
-                  "days": 90,
-                  "storage_class": "STANDARD_IA"
-                }
-              ]
-            }
-          ]
-
     - name: AWS
       technologies: [pipeline]
       vars:

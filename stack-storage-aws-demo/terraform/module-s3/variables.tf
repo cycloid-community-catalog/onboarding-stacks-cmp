@@ -20,15 +20,3 @@ variable "versioning_enabled" {
   description = "Enable versioning for the bucket"
   default     = true
 }
-
-variable "custom_lifecycle_rules" {
-  type        = bool
-  description = "Enable custom lifecycle rules for the bucket"
-  default     = false
-}
-
-variable "lifecycle_rules" {
-  type        = string
-  description = "JSON string containing lifecycle rules configuration"
-  default     = "[]"
-} 

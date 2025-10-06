@@ -16,32 +16,6 @@ resource "aws_s3_bucket_versioning" "this" {
   }
 }
 
-resource "aws_s3_bucket_lifecycle_configuration" "this" {
-  count = var.custom_lifecycle_rules ? 1 : 0
-  
-  bucket = aws_s3_bucket.this.id
-
-  dynamic "rule" {
-    for_each = jsondecode(var.lifecycle_rules)
-    content {
-      id     = rule.value.id
-      status = rule.value.enabled ? "Enabled" : "Disabled"
-
-      filter {
-        prefix = rule.value.prefix
-      }
-
-      dynamic "transition" {
-        for_each = rule.value.transition
-        content {
-          days          = transition.value.days
-          storage_class = transition.value.storage_class
-        }
-      }
-    }
-  }
-}
-
 resource "aws_s3_bucket_server_side_encryption_configuration" "this" {
   bucket = aws_s3_bucket.this.id
 
