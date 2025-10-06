@@ -1,18 +1,12 @@
 module "network" {
   #####################################
   # Do not modify the following lines #
-  source   = "./network"
-  project  = var.project
-  env      = var.env
-  customer = var.customer
+  source       = "./network"
+  cy_org       = var.cy_org
+  cy_project   = var.cy_project
+  cy_env       = var.cy_env
+  cy_component = var.cy_component
   #####################################
-
-  #. extra_tags (optional): {}
-  #+ Dict of extra tags to add on resources. format { "foo" = "bar" }.
-  extra_tags = {
-    demo = true
-    monitoring_discovery = false
-  }
 
   #. vpc_cidr: "10.0.0.0/16"
   #+ Public Subnet CIDR

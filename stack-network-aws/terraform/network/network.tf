@@ -3,7 +3,7 @@ resource "aws_vpc" "vpc" {
   cidr_block = var.vpc_cidr
 
   tags = merge(local.merged_tags, {
-    Name = "${var.customer}-${var.project}-${var.env}-vpc"
+    Name = "${var.cy_org}-${var.cy_project}-${var.cy_env}-${var.cy_component}"
     role = "vpc"
   })
 }
@@ -13,7 +13,7 @@ resource "aws_internet_gateway" "internet_gateway" {
   vpc_id = aws_vpc.vpc.id
 
   tags = merge(local.merged_tags, {
-    Name = "${var.customer}-${var.project}-${var.env}-ig"
+    Name = "${var.cy_org}-${var.cy_project}-${var.cy_env}-${var.cy_component}-ig"
     role = "internet_gateway"
   })
 }
@@ -26,7 +26,7 @@ resource "aws_subnet" "public_subnet" {
   map_public_ip_on_launch = true
 
   tags = merge(local.merged_tags, {
-    Name = "${var.customer}-${var.project}-${var.env}-public-subnet"
+    Name = "${var.cy_org}-${var.cy_project}-${var.cy_env}-${var.cy_component}-public-subnet"
     role = "public_subnet"
     Tier = "Public"
   })
@@ -40,7 +40,7 @@ resource "aws_subnet" "private_subnet" {
   map_public_ip_on_launch = false
 
   tags = merge(local.merged_tags, {
-    Name = "${var.customer}-${var.project}-${var.env}-private-subnet"
+    Name = "${var.cy_org}-${var.cy_project}-${var.cy_env}-${var.cy_component}-private-subnet"
     role = "private_subnet"
     Tier = "Private"
   })
@@ -57,7 +57,7 @@ resource "aws_route_table" "public_route_table" {
   }
 
   tags = merge(local.merged_tags, {
-    Name = "${var.customer}-${var.project}-${var.env}-public-rt"
+    Name = "${var.cy_org}-${var.cy_project}-${var.cy_env}-${var.cy_component}-public-rt"
     role = "public_route_table"
   })
 }
@@ -75,7 +75,7 @@ resource "aws_eip" "eip_nat_gateway" {
   domain   = "vpc"
 
   tags = merge(local.merged_tags, {
-    Name = "${var.customer}-${var.project}-${var.env}-eip"
+    Name = "${var.cy_org}-${var.cy_project}-${var.cy_env}-${var.cy_component}-eip"
     role = "eip_nat_gateway"
   })
 }
@@ -88,7 +88,7 @@ resource "aws_nat_gateway" "nat_gateway" {
   subnet_id = aws_subnet.public_subnet.id
 
   tags = merge(local.merged_tags, {
-    Name = "${var.customer}-${var.project}-${var.env}-nat-gw"
+    Name = "${var.cy_org}-${var.cy_project}-${var.cy_env}-${var.cy_component}-nat-gw"
     role = "nat_gateway"
   })
 }
@@ -105,7 +105,7 @@ resource "aws_route_table" "private_route_table" {
   }
 
   tags = merge(local.merged_tags, {
-    Name = "${var.customer}-${var.project}-${var.env}-private-rt"
+    Name = "${var.cy_org}-${var.cy_project}-${var.cy_env}-${var.cy_component}-private-rt"
     role = "private_route_table"
   })
 }

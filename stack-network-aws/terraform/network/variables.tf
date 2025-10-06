@@ -1,7 +1,8 @@
 # Cycloid
-variable "customer" {}
-variable "env" {}
-variable "project" {}
+variable "cy_org" {}
+variable "cy_project" {}
+variable "cy_env" {}
+variable "cy_component" {}
 
 #
 # VPC
@@ -28,19 +29,4 @@ variable "nat_gateway" {
   type        = bool
   description = "Whether to deploy a NAT gateway or not."
   default     = false
-}
-
-# Tags
-variable "extra_tags" {
-  default = {}
-}
-
-locals {
-  standard_tags = {
-    "cycloid.io" = "true"
-    env          = var.env
-    project      = var.project
-    customer     = var.customer
-  }
-  merged_tags = merge(local.standard_tags, var.extra_tags)
 }

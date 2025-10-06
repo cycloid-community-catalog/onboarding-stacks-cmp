@@ -1,7 +1,8 @@
 # Cycloid variables
-variable "env" {}
-variable "project" {}
-variable "customer" {}
+variable "cy_org" {}
+variable "cy_project" {}
+variable "cy_env" {}
+variable "cy_component" {}
 
 # AWS variables
 variable "aws_cred" {
