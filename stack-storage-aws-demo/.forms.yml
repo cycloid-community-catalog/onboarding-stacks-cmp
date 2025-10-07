@@ -22,7 +22,7 @@ use_cases:
         key: bucket_enable_website_hosting
         widget: switch
         type: boolean
-        default: true
+        default: false
         required: true
     - name: Website Hosting Configuration
       technologies: [terraform]
