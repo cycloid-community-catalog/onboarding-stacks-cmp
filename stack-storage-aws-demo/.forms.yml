@@ -17,13 +17,32 @@ use_cases:
         validations:
         - regexp: "^[a-z0-9][a-z0-9.-]*[a-z0-9]$"
           error_message: "Must be 3 to 63 alphanumeric, dots, and hyphens chars."
-
-      - name: "Versioning"
-        description: "Enable versioning for the bucket"
-        key: versioning_enabled
+      - name: "Enable Website Hosting"
+        description: "Enable website hosting for the bucket"
+        key: bucket_enable_website_hosting
         widget: switch
         type: boolean
         default: true
+        required: true
+    - name: Website Hosting Configuration
+      technologies: [terraform]
+      condition: '$enable_website_hosting == true'
+      vars:
+      - name: "Index Document"
+        description: "Index document for the bucket"
+        key: bucket_index_document
+        widget: simple_text
+        type: string
+        default: "index.html"
+        required: true
+      - name: "Error Document"
+        description: "Error document for the bucket"
+        key: bucket_error_document
+        widget: simple_text
+        type: string
+        default: "error.html"
+        required: true
+
 
     - name: AWS
       technologies: [pipeline]

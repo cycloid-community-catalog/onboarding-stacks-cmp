@@ -10,6 +10,8 @@ module "s3" {
 
   # S3 configuration
   bucket_name            = "cy-${var.cy_org}-${var.cy_project}-${var.cy_env}-${var.cy_component}"
+  bucket_enable_website_hosting = true
+  bucket_index_document  = "index.html"
+  bucket_error_document  = "error.html"
   aws_region             = "eu-west-1"
-  versioning_enabled     = true
 } 
