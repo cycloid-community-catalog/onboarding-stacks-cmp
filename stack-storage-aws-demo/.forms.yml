@@ -26,7 +26,7 @@ use_cases:
         required: true
     - name: Website Hosting Configuration
       technologies: [terraform]
-      condition: '$enable_website_hosting == true'
+      condition: '$bucket_enable_website_hosting == true'
       vars:
       - name: "Index Document"
         description: "Index document for the bucket"
