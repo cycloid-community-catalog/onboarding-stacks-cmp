@@ -95,7 +95,7 @@ jobs:
           - name: merged-stack
             path: "merged-stack"
         params:
-          CONFIG_PATH: ($ .org $)/(($ .project $)/($ .env $)/($ .component $)/terraform
+          CONFIG_PATH: ($ .config_root $)/terraform
           STACK_PATH: ($ .stack_path $)/terraform
 
       - put: tfstate
