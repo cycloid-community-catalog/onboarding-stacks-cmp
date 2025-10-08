@@ -17,7 +17,7 @@ vm_instance_status: "Started"
 
 #. destroy_timer_in_minutes (required): 10
 #+ The number of minutes to wait before automatically destroying the infrastructure after creation.
-destroy_timer_in_minutes: 10
+destroy_timer_in_minutes: 60
 
 
 #
