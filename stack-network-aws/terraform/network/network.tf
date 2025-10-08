@@ -3,7 +3,7 @@ resource "aws_vpc" "vpc" {
   cidr_block = var.vpc_cidr
 
   tags = {
-    Name = "${var.cy_org}-${var.cy_project}-${var.cy_env}-${var.cy_component}"
+    Name = "${var.cy_component}-vpc"
     role = "vpc"
   }
 }
