@@ -1,41 +1,33 @@
 # Cycloid
-variable "customer" {}
-variable "env" {}
-variable "project" {}
+variable "cy_org" {}
+variable "cy_project" {}
+variable "cy_env" {}
+variable "cy_component" {}
 
-variable "resource_group_name" {
-  type        = string
-  description = "The name of the existing resource group where the resources will be deployed."
-  default     = ""
+# Infra
+variable "service_plan_sku_name" {
+  description = "Service plan SKU name."
+  default = "Y1"
 }
-
-# variable "azure_location" {
-#   description = "Azure location"
-#   default = "West Europe"
-# }
 
 variable "python_version" {
   description = "Python version"
   default = "3.11"
 }
 
-variable "service_plan_sku_name" {
-  description = "Service plan SKU name."
-  default = "Y1"
+variable "res_selector" {
+  description = "Whether to create a new resource group or select an existing one"
 }
 
+variable "azure_location" {
+  description = "Azure location"
+}
 
-# Tags
-variable "extra_tags" {
-  default = {}
+variable "resource_group_name_inventory" {
+  description = "The name of the existing resource group where the resources will be deployed"
 }
 
 locals {
-  standard_tags = {
-    "cycloid" = "true"
-    env          = var.env
-    project      = var.project
-    customer     = var.customer
-  }
-  merged_tags = merge(local.standard_tags, var.extra_tags)
+  resource_group_name = var.res_selector == "create" ? azurerm_resource_group.compute[0].name : data.azurerm_resource_group.selected[0].name
+  resource_group_location = var.res_selector == "create" ? azurerm_resource_group.compute[0].location : data.azurerm_resource_group.selected[0].location
 }

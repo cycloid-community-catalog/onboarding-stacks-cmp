@@ -1,7 +1,7 @@
 resource "azurerm_linux_function_app" "linux_function_app" {
-  name                = "${var.customer}-${var.project}-${var.env}"
-  resource_group_name = data.azurerm_resource_group.resource_group.name
-  location            = data.azurerm_resource_group.resource_group.location
+  name                = "${var.cy_org}-${var.cy_project}-${var.cy_env}"
+  resource_group_name = local.resource_group_name
+  location            = local.resource_group_location
 
   storage_account_name       = azurerm_storage_account.storage_account.name
   storage_account_access_key = azurerm_storage_account.storage_account.primary_access_key
@@ -21,11 +21,8 @@ resource "azurerm_linux_function_app" "linux_function_app" {
     }
   }
 
-  # zip_deploy_file = data.archive_file.function_package.output_path
-  # zip_deploy_file = azurerm_storage_blob.storage_blob.name
-
   tags = merge(local.merged_tags, {
-    Name = "${var.customer}-${var.project}-${var.env}"
+    Name = "${var.cy_org}-${var.cy_project}-${var.cy_env}"
     role = "function_app"
   })
 }

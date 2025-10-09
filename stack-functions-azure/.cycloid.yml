@@ -1,0 +1,30 @@
+---
+# Configuration of the Cycloid stack
+version: '4'
+name: Azure Function (Python)
+canonical: stack-functions-azure-demo
+author: Cycloid
+description: |
+  Deploy a Python Azure Function App with its new Storage Account and Service Plan using Terraform and deploy the function endpoints using Azure Functions Core Tools.
+image: |
+  https://cycloid-demo-stacks-logo.s3.eu-west-1.amazonaws.com/azure-functions.png
+keywords:
+  - functions
+  - python
+  - provider:azure
+technologies:
+- technology: terraform
+  version: 1.8.3
+
+config:
+  default:
+    pipeline:
+      pipeline:
+        path: pipeline/pipeline.yaml
+      variables:
+        path: pipeline/variables.sample.yaml
+        destination: '($ .config_root $)/pipeline/variables.yaml'
+    terraform:
+      main:
+        path: 'terraform/main.tf'
+        destination: '($ .config_root $)/terraform/main.tf'
