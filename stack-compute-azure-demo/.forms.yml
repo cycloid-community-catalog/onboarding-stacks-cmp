@@ -39,17 +39,11 @@ use_cases:
         - 80
         - 443
 
-      - name: "Azure location"
-        description: "Azure location where to create resources."
-        key: azure_location
-        widget: dropdown
-        values_ref: https://cycloid-demo-stackforms-values.s3.eu-west-1.amazonaws.com/azure-locations.json
-        type: string
-        default: "West Europe"
-        required: true
-
+    - name: Resource Group
+      technologies: [terraform]
+      vars:
       - name: "Create or Select Resource Group"
-        description: "Whether to create a new Resource group or select existing ones."
+        description: "Whether to create a new Resource Group or select an existing one."
         key: res_selector
         widget: dropdown
         type: map
@@ -58,7 +52,19 @@ use_cases:
         values:
         - {"label": "Create new", "value": "create"}
         - {"label": "Select from Asset Inventory", "value": "inventory"}
-        - {"label": "Enter manually", "value": "manual"}
+
+    - name: New Resource Group
+      technologies: [terraform]
+      condition: '$res_selector == "Create new"'
+      vars:
+      - name: "Azure location"
+        description: "Azure location for the new Resource Group."
+        key: resource_group_location
+        widget: dropdown
+        values_ref: https://cycloid-demo-stackforms-values.s3.eu-west-1.amazonaws.com/azure-locations.json
+        type: string
+        default: "West Europe"
+        required: true
 
     - name: Select from Asset Inventory
       technologies: [terraform]
@@ -72,17 +78,6 @@ use_cases:
           attribute: name
           filters:
             type: azurerm_resource_group
-        type: string
-        required: true
-
-    - name: Enter manually
-      technologies: [terraform]
-      condition: '$res_selector == "Enter manually"'
-      vars:
-      - name: "Resource Group Name"
-        description: "The name of the existing resource group where the resources will be deployed."
-        key: resource_group_name_manual
-        widget: simple_text
         type: string
         required: true
 

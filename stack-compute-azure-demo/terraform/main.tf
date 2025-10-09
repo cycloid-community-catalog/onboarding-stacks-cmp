@@ -21,18 +21,14 @@ module "compute" {
   vm_ports_in = ["80", "443"]
 
   #. res_selector: ''
-  #+ Whether to create a new VPC or select an existing one
+  #+ Whether to create a new resource group or select an existing one
   res_selector = ""
 
-  #. azure_location: ""
-  #+ Azure location
-  azure_location = ""
+  #. resource_group_location: ''
+  #+ The location of the new resource group to create
+  resource_group_location = ""
 
   #. resource_group_name_inventory: ''
   #+ The name of the existing resource group where the resources will be deployed
   resource_group_name_inventory = ""
-
-  #. resource_group_name_manual: ''
-  #+ The name of the existing resource group where the resources will be deployed
-  resource_group_name_manual = ""
 }
