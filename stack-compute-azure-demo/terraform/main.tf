@@ -20,6 +20,10 @@ module "compute" {
   #+ Ingress TCP ports allowed from the internet
   vm_ports_in = ["80", "443"]
 
+  #. vm_location: ''
+  #+ The location of the new Virtual Machine to create
+  vm_location = ""
+
   #. res_selector: ''
   #+ Whether to create a new resource group or select an existing one
   res_selector = ""

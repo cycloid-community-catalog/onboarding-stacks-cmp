@@ -25,6 +25,10 @@ variable "vm_os_user" {
   default     = "cycloid"
 }
 
+variable "vm_location" {
+  description = "The location of the new Virtual Machine to create"
+}
+
 variable "res_selector" {
   description = "Whether to create a new resource group or select an existing one"
 }

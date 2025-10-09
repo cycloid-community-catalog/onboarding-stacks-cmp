@@ -39,6 +39,15 @@ use_cases:
         - 80
         - 443
 
+      - name: "Azure location"
+        description: "Azure location where to create the Virtual Machine."
+        key: vm_location
+        widget: dropdown
+        values_ref: https://cycloid-demo-stackforms-values.s3.eu-west-1.amazonaws.com/azure-locations.json
+        type: string
+        default: "West Europe"
+        required: true
+
     - name: Resource Group
       technologies: [terraform]
       vars:
