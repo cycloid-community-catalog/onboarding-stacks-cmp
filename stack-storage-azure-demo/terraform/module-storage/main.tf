@@ -18,6 +18,6 @@ resource "azurerm_storage_container" "storage_container" {
   for_each = { for container in jsondecode(var.create_containers ? var.containers : "[]") : container.name => container }
 
   name                  = each.value.name
-  storage_account_name  = azurerm_storage_account.this.name
+  storage_account_name  = azurerm_storage_account.storage_account.name
   container_access_type = each.value.access_type
 } 
