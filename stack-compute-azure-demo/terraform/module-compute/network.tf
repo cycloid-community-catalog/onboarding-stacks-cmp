@@ -1,7 +1,7 @@
 resource "azurerm_virtual_network" "compute" {
   name                = "${var.cy_org}-${var.cy_project}-${var.cy_env}-${var.cy_component}"
   resource_group_name = local.resource_group_name
-  location            = local.resource_group_location
+  location            = var.res_selector == "create" ? var.resource_group_location : data.azurerm_resource_group.selected[0].location
   address_space       = ["10.77.0.0/16"]
 }
 
@@ -15,7 +15,7 @@ resource "azurerm_subnet" "compute" {
 resource "azurerm_network_security_group" "compute" {
   name                = "${var.cy_org}-${var.cy_project}-${var.cy_env}-${var.cy_component}"
   resource_group_name = local.resource_group_name
-  location            = local.resource_group_location
+  location            = var.res_selector == "create" ? var.resource_group_location : data.azurerm_resource_group.selected[0].location
 
   tags = {
     Name = "${var.cy_org}-${var.cy_project}-${var.cy_env}-${var.cy_component}"
@@ -44,7 +44,7 @@ resource "azurerm_network_security_rule" "inbound" {
 resource "azurerm_public_ip" "compute" {
   name                = "${var.cy_org}-${var.cy_project}-${var.cy_env}-${var.cy_component}"
   resource_group_name = local.resource_group_name
-  location            = local.resource_group_location
+  location            = var.res_selector == "create" ? var.resource_group_location : data.azurerm_resource_group.selected[0].location
   allocation_method   = "Dynamic"
 
   tags = {
@@ -57,7 +57,7 @@ resource "azurerm_public_ip" "compute" {
 resource "azurerm_network_interface" "compute" {
   name                = "${var.cy_org}-${var.cy_project}-${var.cy_env}-${var.cy_component}"
   resource_group_name = local.resource_group_name
-  location            = local.resource_group_location
+  location            = var.res_selector == "create" ? var.resource_group_location : data.azurerm_resource_group.selected[0].location
 
   ip_configuration {
       name                          = "${var.cy_org}-${var.cy_project}-${var.cy_env}-${var.cy_component}"
