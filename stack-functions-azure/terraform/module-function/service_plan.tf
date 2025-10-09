@@ -5,8 +5,8 @@ resource "azurerm_service_plan" "service_plan" {
   os_type             = "Linux"
   sku_name            = var.service_plan_sku_name
 
-  tags = merge(local.merged_tags, {
+  tags = {
     Name = "${var.cy_org}-${var.cy_project}-${var.cy_env}"
     role = "app_service_plan"
-  })
+  }
 }

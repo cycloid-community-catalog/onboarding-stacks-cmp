@@ -6,8 +6,8 @@ resource "azurerm_storage_account" "storage_account" {
   account_tier = "Standard"
   account_replication_type = "LRS"
 
-  tags = merge(local.merged_tags, {
+  tags = {
     Name = "cycloid${var.cy_project}${var.cy_env}"
     role = "storage_account"
-  })
+  }
 }

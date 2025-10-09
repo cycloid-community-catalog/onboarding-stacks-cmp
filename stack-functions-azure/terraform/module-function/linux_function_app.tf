@@ -21,8 +21,8 @@ resource "azurerm_linux_function_app" "linux_function_app" {
     }
   }
 
-  tags = merge(local.merged_tags, {
+  tags = {
     Name = "${var.cy_org}-${var.cy_project}-${var.cy_env}"
     role = "function_app"
-  })
+  }
 }

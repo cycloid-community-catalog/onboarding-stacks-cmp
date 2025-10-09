@@ -4,8 +4,8 @@ resource "azurerm_application_insights" "application_insights" {
   location            = local.resource_group_location
   application_type    = "other"
 
-  tags = merge(local.merged_tags, {
+  tags = {
     Name = "${var.cy_org}-${var.cy_project}-${var.cy_env}"
     role = "application_insights"
-  })
+  }
 }
