@@ -39,7 +39,7 @@ use_cases:
         - 80
         - 443
 
-      - name: "Azure location"
+      - name: "Virtual Machine location"
         description: "Azure location where to create the Virtual Machine."
         key: vm_location
         widget: dropdown
@@ -66,7 +66,7 @@ use_cases:
       technologies: [terraform]
       condition: '$res_selector == "Create new"'
       vars:
-      - name: "Azure location"
+      - name: "Resource Group location"
         description: "Azure location for the new Resource Group."
         key: resource_group_location
         widget: dropdown
