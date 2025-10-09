@@ -1,5 +1,5 @@
 resource "azurerm_storage_account" "storage_account" {
-  name = replace("cycloid${var.cy_project}${var.cy_env}", "-", "")
+  name = substr(replace("cy${var.cy_project}${var.cy_env}", "-", ""), 0, 24)
   resource_group_name = local.resource_group_name
   location = local.resource_group_location
   account_kind = "Storage"
