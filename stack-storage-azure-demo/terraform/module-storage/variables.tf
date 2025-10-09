@@ -9,12 +9,6 @@ variable "storage_account_name" {
   description = "Name of the storage account to create"
 }
 
-variable "azure_location" {
-  type        = string
-  description = "Azure region where the storage account will be created"
-  default     = "westeurope"
-}
-
 variable "account_tier" {
   type        = string
   description = "The tier of the storage account"

@@ -10,7 +10,6 @@ module "storage" {
 
   # Storage configuration
   storage_account_name      = "cy-${var.cy_org}-${var.cy_project}-${var.cy_env}-${var.cy_component}"
-  azure_location            = "West Europe"
   account_tier              = "Standard"
   replication_type          = "LRS"
   https_traffic_only_enabled = true

@@ -1,4 +1,4 @@
-resource "azurerm_storage_account" "this" {
+resource "azurerm_storage_account" "storage_account" {
   name                     = var.storage_account_name
   resource_group_name      = local.resource_group_name
   location                 = local.resource_group_location
@@ -14,7 +14,7 @@ resource "azurerm_storage_account" "this" {
   }
 }
 
-resource "azurerm_storage_container" "this" {  
+resource "azurerm_storage_container" "storage_container" {  
   for_each = { for container in jsondecode(var.create_containers ? var.containers : "[]") : container.name => container }
 
   name                  = each.value.name
