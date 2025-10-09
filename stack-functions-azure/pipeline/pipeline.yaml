@@ -1,17 +1,3 @@
-# YAML anchors
-shared:
-# Task : sync and merge with rsync 2 rep. Used to merge stack and config
-- &merge-stack-and-config
-  platform: linux
-  image_resource:
-    type: registry-image
-    source:
-      repository: cycloid/cycloid-toolkit
-      tag: latest
-  run:
-    path: /usr/bin/merge-stack-and-config
-
-
 resource_types:
 - name: terraform
   type: registry-image
@@ -25,16 +11,18 @@ resources:
   type: terraform
   icon: terraform
   source:
-    env_name: ($ .environment $)
+    env_name: ($ .env $)
     backend_type: http
     backend_config:
       address: '($ .api_url $)/inventory?jwt=($ .inventory_jwt $)'
     vars:
       azure_cred: ((azure_cred))
-      env: ($ .environment $)
-      project: ($ .project $)
-      customer: ($ .organization_canonical $)
+      cy_org: ($ .org $)
+      cy_project: ($ .project $)
+      cy_env: ($ .env $)
+      cy_component: ($ .component $)
 
+# The git repository where the azure function to deploy is located
 - name: git_function
   type: git
   icon: github-circle
@@ -74,24 +62,22 @@ resources:
     private_key: ((($ .cr_cred_path $).ssh_key))
     ($- end $)
     paths:
-      - ($ .project $)/terraform/($ .environment $)/*
+      - ($ .config_root $)/terraform/*
 
 
 groups:
 - name: overview
   jobs:
-    - terraform-plan
-    - terraform-apply
+    - deploy-infra
     - deploy-functions
 
 - name: destroy
   jobs:
-    - terraform-destroy
+    - destroy
 
 
 jobs:
-  # Merge and trigger a plan whenever there is a commit in Terraform stack or config
-  - name: terraform-plan
+  - name: deploy-infra
     serial: true
     max_in_flight: 1
     build_logs_to_retain: 10
@@ -99,13 +85,19 @@ jobs:
       - in_parallel:
         - get: git_stack-terraform
           trigger: true
-
         - get: git_config-terraform
           trigger: true
 
       - task: merge-stack-and-config
         config:
-          <<: *merge-stack-and-config
+          platform: linux
+          image_resource:
+            type: registry-image
+            source:
+              repository: cycloid/cycloid-toolkit
+              tag: latest
+          run:
+            path: /usr/bin/merge-stack-and-config
           inputs:
           - name: git_config-terraform
             path: "config"
@@ -115,55 +107,11 @@ jobs:
           - name: merged-stack
             path: "merged-stack"
         params:
-          CONFIG_PATH: ($ .project $)/terraform/($ .environment $)
+          CONFIG_PATH: ($ .config_root $)/terraform
           STACK_PATH: ($ .stack_path $)/terraform
 
       - put: tfstate
         params:
-          plan_only: true
-          terraform_source: merged-stack/
-
-
-  # Merge and trigger an apply whenever there is a terraform plan passed successfully
-  - name: terraform-apply
-    serial: true
-    max_in_flight: 1
-    build_logs_to_retain: 10
-    plan:
-      - in_parallel:
-        - get: git_stack-terraform
-          trigger: false
-          passed:
-            - terraform-plan
-
-        - get: git_config-terraform
-          trigger: false
-          passed:
-            - terraform-plan
-
-        - get: tfstate
-          trigger: true
-          passed:
-            - terraform-plan
-
-      - task: merge-stack-and-config
-        config:
-          <<: *merge-stack-and-config
-          inputs:
-          - name: git_config-terraform
-            path: "config"
-          - name: git_stack-terraform
-            path: "stack"
-          outputs:
-          - name: merged-stack
-            path: "merged-stack"
-        params:
-          CONFIG_PATH: ($ .project $)/terraform/($ .environment $)
-          STACK_PATH: ($ .stack_path $)/terraform
-
-      - put: tfstate
-        params:
-          plan_run: true
           terraform_source: merged-stack/
 
 
@@ -175,8 +123,7 @@ jobs:
         - get: tfstate
           trigger: true
           passed:
-            - terraform-apply
-
+            - deploy-infra
         - get: git_function
           trigger: true
 
@@ -199,39 +146,40 @@ jobs:
                 export AZURE_SUBSCRIPTION_ID=$(echo ${AZURE_CRED} | jq -r .subscription_id)
                 az login --service-principal --username ${AZURE_CLIENT_ID} --password ${AZURE_CLIENT_SECRET} --tenant ${AZURE_TENANT_ID}
                 cd git_function
-                func azure functionapp publish ${customer}-${project}-${env}
+                func azure functionapp publish ${CY_ORG}-${CY_PROJECT}-${CY_ENV}
           inputs:
           - name: git_function
             path: git_function
         params:
-          env: ($ .environment $)
-          project: ($ .project $)
-          customer: ($ .organization_canonical $)
+          CY_ENV: ($ .env $)
+          CY_PROJECT: ($ .project $)
+          CY_ORG: ($ .org $)
           AZURE_CRED: ((azure_cred))
 
 
   # Destroy the infrastructure
-  - name: terraform-destroy
+  - name: destroy
     max_in_flight: 1
     build_logs_to_retain: 10
     plan:
       - in_parallel:
         - get: git_stack-terraform
           trigger: false
-          passed:
-            - terraform-plan
-
         - get: git_config-terraform
           trigger: false
-          passed:
-            - terraform-plan
-
         - get: tfstate
           trigger: false
 
       - task: merge-stack-and-config
         config:
-          <<: *merge-stack-and-config
+          platform: linux
+          image_resource:
+            type: registry-image
+            source:
+              repository: cycloid/cycloid-toolkit
+              tag: latest
+          run:
+            path: /usr/bin/merge-stack-and-config
           inputs:
           - name: git_config-terraform
             path: "config"
@@ -241,7 +189,7 @@ jobs:
           - name: merged-stack
             path: "merged-stack"
         params:
-          CONFIG_PATH: ($ .project $)/terraform/($ .environment $)
+          CONFIG_PATH: ($ .config_root $)/terraform
           STACK_PATH: ($ .stack_path $)/terraform
 
       - put: tfstate
