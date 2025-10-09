@@ -37,6 +37,19 @@ use_cases:
         - {"label": "Create new", "value": "create"}
         - {"label": "Select from Asset Inventory", "value": "inventory"}
 
+    - name: New Resource Group
+      technologies: [terraform]
+      condition: '$res_selector == "Create new"'
+      vars:
+      - name: "Azure location"
+        description: "Azure location for the new Resource Group."
+        key: resource_group_location
+        widget: dropdown
+        values_ref: https://cycloid-demo-stackforms-values.s3.eu-west-1.amazonaws.com/azure-locations.json
+        type: string
+        default: "West Europe"
+        required: true
+
     - name: Select from Asset Inventory
       technologies: [terraform]
       condition: '$res_selector == "Select from Asset Inventory"'
