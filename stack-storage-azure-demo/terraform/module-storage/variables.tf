@@ -46,19 +46,18 @@ variable "containers" {
 } 
 
 variable "res_selector" {
-  type        = string
   description = "Whether to create a new resource group or select an existing one"
-  default     = "create"
+}
+
+variable "resource_group_location" {
+  description = "The location of the new resource group to create"
 }
 
 variable "resource_group_name_inventory" {
-  type        = string
-  description = "Name of the existing resource group to use"
-  default     = ""
+  description = "The name of the existing resource group where the resources will be deployed"
 }
 
-variable "resource_group_name_manual" {
-  type        = string
-  description = "Name of the manually created resource group"
-  default     = ""
+locals {
+  resource_group_name = var.res_selector == "create" ? azurerm_resource_group.compute[0].name : data.azurerm_resource_group.selected[0].name
+  resource_group_location = var.res_selector == "create" ? var.resource_group_location : data.azurerm_resource_group.selected[0].location
 }

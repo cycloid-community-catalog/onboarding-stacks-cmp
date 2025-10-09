@@ -49,7 +49,7 @@ The automation can be configured through the following parameters:
 
 ## Usage
 
-1. Configure your Azure credentials
+1. Configure your Azure Subscription
 2. Set the required variables in your Cycloid project or directly in the Terraform configuration
 3. Deploy through Cycloid platform or using Terraform directly
 

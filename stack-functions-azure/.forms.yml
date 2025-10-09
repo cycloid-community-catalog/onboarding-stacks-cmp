@@ -89,8 +89,8 @@ use_cases:
     - name: Access Configuration
       technologies: [pipeline]
       vars:
-      - name: "Azure credentials"
-        description: "The azure credential used to deploy the infrastructure. It contains subscription_id, tenant_id, client_id, and client_secret."
+      - name: "Azure Subscription"
+        description: "The azure subscription used to deploy the infrastructure. It contains subscription_id, tenant_id, client_id, and client_secret."
         key: azure_cred
         widget: cy_cred
         widget_config:
