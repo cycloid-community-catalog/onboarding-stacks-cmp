@@ -3,7 +3,7 @@ resource "azurerm_linux_virtual_machine" "compute" {
   name                  = "${var.cy_org}-${var.cy_project}-${var.cy_env}-${var.cy_component}"
   computer_name         = "${var.cy_org}-${var.cy_project}-${var.cy_env}-${var.cy_component}"
   resource_group_name   = local.resource_group_name
-  location              = local.resource_group_location
+  location              = var.res_selector == "create" ? var.resource_group_location : data.azurerm_resource_group.selected[0].location
   network_interface_ids = [azurerm_network_interface.compute.id]
   size                  = var.vm_instance_type
   admin_username        = var.vm_os_user
