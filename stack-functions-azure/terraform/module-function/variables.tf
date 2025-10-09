@@ -19,10 +19,6 @@ variable "res_selector" {
   description = "Whether to create a new resource group or select an existing one"
 }
 
-variable "azure_location" {
-  description = "Azure location"
-}
-
 variable "resource_group_name_inventory" {
   description = "The name of the existing resource group where the resources will be deployed"
 }
