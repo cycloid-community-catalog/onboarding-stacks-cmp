@@ -1,7 +1,7 @@
 data "azurerm_resource_group" "selected" {
   count = var.res_selector == "create" ? 0 : 1
 
-  name = var.res_selector == "inventory" ? var.resource_group_name_inventory : var.resource_group_name_manual
+  name = var.res_selector == var.resource_group_name_inventory
 }
 
 resource "azurerm_resource_group" "compute" {
