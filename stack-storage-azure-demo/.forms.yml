@@ -18,15 +18,6 @@ use_cases:
         - regexp: "^[a-z0-9]{3,24}$"
           error_message: "Must be 3 to 24 alphanumeric characters."
 
-      - name: "Azure Location"
-        description: "Azure region to deploy the storage account"
-        key: azure_location
-        widget: auto_complete
-        type: string
-        default: "West Europe"
-        values_ref: https://cycloid-demo-stackforms-values.s3.eu-west-1.amazonaws.com/azure-locations.json
-        required: true 
-        
       - name: "Account Tier"
         description: "The tier of the storage account"
         key: account_tier
