@@ -405,3 +405,5 @@ use_cases:
         required: true
 
 - name: vmware
+  sections:
+  - name: Not yet implemented
