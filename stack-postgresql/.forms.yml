@@ -407,3 +407,13 @@ use_cases:
 - name: vmware
   sections:
   - name: Not yet implemented
+    groups:
+    - name: Not yet implemented
+      technologies: []
+      vars:
+      - name: "Not yet implemented"
+        description: "Not yet implemented"
+        key: not_yet_implemented
+        widget: simple_text
+        type: string
+        required: true
