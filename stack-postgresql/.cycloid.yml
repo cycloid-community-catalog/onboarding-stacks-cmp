@@ -61,3 +61,14 @@ config:
       main:
         path: 'terraform/gcp/main.tf'
         destination: '($ .config_root $)/terraform/gcp/main.tf'
+
+  vmware:
+    name: 'PostgreSQL on VMware'
+    description: 'PostgreSQL on a VMware Virtual Machine.'
+    cloud_provider: vmware
+    pipeline:
+      pipeline:
+        path: 'pipeline/pipeline.yml'
+      variables:
+        path: 'pipeline/variables.sample.yml'
+        destination: '($ .config_root $)/pipeline/variables.yml'

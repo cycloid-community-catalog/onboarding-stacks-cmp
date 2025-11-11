@@ -403,3 +403,5 @@ use_cases:
         type: integer
         default: 60
         required: true
+
+- name: vmware
