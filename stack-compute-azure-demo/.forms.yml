@@ -29,15 +29,15 @@ use_cases:
             - 250
         required: true
 
-      - name: "Ingress TCP ports"
-        description: "Ingress TCP ports allowed from the internet. Type any ports as needed."
-        key: vm_ports_in
-        widget: text_area
-        type: array
-        default:
-        - 22
-        - 80
-        - 443
+      # - name: "Ingress TCP ports"
+      #   description: "Ingress TCP ports allowed from the internet. Type any ports as needed."
+      #   key: vm_ports_in
+      #   widget: text_area
+      #   type: array
+      #   default:
+      #   - 22
+      #   - 80
+      #   - 443
 
       - name: "Virtual Machine location"
         description: "Azure location where to create the Virtual Machine."
