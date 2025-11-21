@@ -29,14 +29,14 @@ use_cases:
             - 250
         required: true
         
-      - name: "Ingress TCP ports"
-        description: "Ingress TCP ports allowed from the internet. Type any ports as needed."
-        key: vm_ports_in
-        widget: text_area
-        type: array
-        default:
-        - 80
-        - 443
+      # - name: "Ingress TCP ports"
+      #   description: "Ingress TCP ports allowed from the internet. Type any ports as needed."
+      #   key: vm_ports_in
+      #   widget: text_area
+      #   type: array
+      #   default:
+      #   - 80
+      #   - 443
 
       - name: "Create or Select VPC"
         description: "Whether to create a new VPC or select an existing one."
