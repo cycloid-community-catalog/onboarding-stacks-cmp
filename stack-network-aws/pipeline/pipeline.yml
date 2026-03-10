@@ -154,3 +154,34 @@ jobs:
           terraform_source: merged-stack/
         get_params:
           action: destroy
+
+      - task: pause-pipeline
+        config:
+          platform: linux
+          image_resource:
+            type: registry-image
+            source:
+              repository: cycloid/cycloid-toolkit
+          run:
+            path: /bin/bash
+            args:
+              - '-ec'
+              - |
+                echo "Pause pipeline ${PROJECT}/${ENV}/${COMPONENT} in org ${CY_ORG}"
+                cy pipeline pause \
+                --org ${CY_ORG} \
+                --project ${PROJECT} \
+                --env ${ENV} \
+                --component ${COMPONENT} >output
+                if [[ "$?" != "0" ]]; then
+                    echo "Pause Pipeline Error: cy returned code $?"
+                    cat output
+                    exit 1
+                fi
+          params:
+            CY_API_KEY: ((cy_api_key))
+            CY_API_URL: ($ .api_url $)
+            CY_ORG: ($ .org $)
+            PROJECT: ($ .project $)
+            ENV: ($ .env $)
+            COMPONENT: ($ .component $)
