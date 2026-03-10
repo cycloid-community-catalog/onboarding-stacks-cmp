@@ -49,8 +49,13 @@ resources:
   icon: github-circle
   source:
     uri: ($ .scs_url $)
-    branch: ($ .scs_branch $)
-    ($- if eq .scs_cred_type "basic_auth" $)
+    ($- if eq .stack_version_type "branch" $)
+    branch: ($ .stack_version_ref $)
+    ($- end $) 
+    ($- if eq .stack_version_type "tag" $)
+    tag_filter: ($ .stack_version_ref $)
+    fetch_tags: true
+    ($- end $)     ($- if eq .scs_cred_type "basic_auth" $)
     username: ((($ .scs_cred_path $).username))
     password: ((($ .scs_cred_path $).password))
     ($- end $)
