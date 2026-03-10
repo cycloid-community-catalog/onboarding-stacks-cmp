@@ -6,6 +6,6 @@ provider "google" {
 
 provider "cycloid" {
   organization_canonical = var.cy_org
-  jwt                    = var.cy_api_key
+  api_key                = var.cy_api_key
   url                    = var.cy_api_url
 }
