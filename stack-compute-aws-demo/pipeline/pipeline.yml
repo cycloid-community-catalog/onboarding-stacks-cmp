@@ -158,9 +158,9 @@ jobs:
             path: tfstate
         params:
           vm_instance_status: '((vm_instance_status))'
-          AWS_ACCESS_KEY_ID: ($ .environment.provider.aws.credential.access_key $)
-          AWS_SECRET_ACCESS_KEY: ($ .environment.provider.aws.credential.secret_key $)
-          AWS_DEFAULT_REGION: ($ .env_vars.aws_region $)
+          #AWS_ACCESS_KEY_ID: ($ .environment.provider.aws.credential.access_key $)
+          #AWS_SECRET_ACCESS_KEY: ($ .environment.provider.aws.credential.secret_key $)
+          #AWS_DEFAULT_REGION: ($ .env_vars.aws_region $)
 
 
   - name: destroy
