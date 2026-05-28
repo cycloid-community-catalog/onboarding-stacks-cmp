@@ -16,8 +16,7 @@ resources:
     backend_config:
       address: '($ .api_url $)/inventory?jwt=($ .inventory_jwt $)'
     vars:
-      aws_access_key: ($ .environment.provider.aws-demo-account.credential.access_key $)
-      aws_secret_key: ($ .environment.provider.aws-demo-account.credential.secret_key $)
+      aws_cred: ($ .environment.provider.aws.credential $)
       aws_region: ($ .env_vars.aws_region $)
       vpc_id: ($ .env_vars.vpc_id $)
       cy_api_key: ((cy_api_key))
@@ -159,8 +158,8 @@ jobs:
             path: tfstate
         params:
           vm_instance_status: '((vm_instance_status))'
-          AWS_ACCESS_KEY_ID: ($ .environment.provider.aws-demo-account.credential.access_key $)
-          AWS_SECRET_ACCESS_KEY: ($ .environment.provider.aws-demo-account.credential.secret_key $)
+          AWS_ACCESS_KEY_ID: ($ .environment.provider.aws.credential.access_key $)
+          AWS_SECRET_ACCESS_KEY: ($ .environment.provider.aws.credential.secret_key $)
           AWS_DEFAULT_REGION: ($ .env_vars.aws_region $)
 
 
