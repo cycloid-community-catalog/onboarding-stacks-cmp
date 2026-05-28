@@ -17,7 +17,6 @@ resources:
       address: '($ .api_url $)/inventory?jwt=($ .inventory_jwt $)'
     vars:
       aws_access_key: ($ .environment.provider.aws.credential.access_key $)
-      aws_secret_key: ($ .environment.provider.aws.credential.secret_key $)
       cy_api_key: ((cy_api_key))
       cy_api_url: ($ .api_url $)
       cy_org: ($ .org $)
