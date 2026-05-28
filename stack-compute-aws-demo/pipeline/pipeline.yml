@@ -14,7 +14,7 @@ resources:
     env_name: ($ .env $)
     backend_type: http
     backend_config:
-      address: '($ .api_url $)/inventory?jwt=($ .inventory_jwt $)'
+      address: '($ .api_url $)/inventory'
     vars:
       aws_access_key: ($ .environment.provider.aws.credential.access_key $)
       aws_secret_key: ($ .environment.provider.aws.credential.secret_key $)
