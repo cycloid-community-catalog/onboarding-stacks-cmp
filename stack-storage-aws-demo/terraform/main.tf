@@ -13,5 +13,5 @@ module "s3" {
   bucket_enable_website_hosting = true
   bucket_index_document  = "index.html"
   bucket_error_document  = "error.html"
-  aws_region             = "eu-west-1"
+  aws_region             = var.aws_region
 } 

@@ -10,7 +10,9 @@ variable "aws_cred" {
 }
 variable "aws_region" {
   description = "AWS region where to create servers."
-  default     = "eu-west-1"
+}
+variable "vpc_id" {
+  description = "VPC ID where to deploy the resources (from environment env_vars)."
 }
 
 # Cycloid

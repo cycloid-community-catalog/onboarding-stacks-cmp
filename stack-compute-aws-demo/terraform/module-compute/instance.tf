@@ -1,6 +1,6 @@
 resource "aws_security_group" "ec2" {
   name        = "${var.cy_org}-${var.cy_project}-${var.cy_env}-${var.cy_component}"
-  vpc_id      = var.res_selector == "create" ? module.vpc[0].vpc_id : data.aws_vpc.selected[0].id
+  vpc_id      = data.aws_vpc.selected.id
 }
 
 resource "aws_security_group_rule" "egress-all" {
@@ -32,7 +32,7 @@ resource "aws_instance" "ec2" {
   iam_instance_profile   = aws_iam_instance_profile.ssm-profile.name
   vpc_security_group_ids = [aws_security_group.ec2.id]
 
-  subnet_id                   = var.res_selector == "create" ? module.vpc[0].public_subnets[0] : data.aws_subnet.selected[0].id
+  subnet_id                   = data.aws_subnet.selected.id
   associate_public_ip_address = true
   disable_api_termination     = false
 

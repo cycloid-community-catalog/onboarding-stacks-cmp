@@ -15,7 +15,10 @@ resources:
     backend_config:
       address: '($ .api_url $)/inventory?jwt=($ .inventory_jwt $)'
     vars:
-      aws_cred: ((aws_cred))
+      aws_cred:
+        access_key: ($ .environment.provider.aws.credential.access_key $)
+        secret_key: ($ .environment.provider.aws.credential.secret_key $)
+      aws_region: ($ .env_vars.aws_region $)
       cy_org: ($ .org $)
       cy_project: ($ .project $)
       cy_env: ($ .env $)
@@ -40,8 +43,10 @@ resources:
     ($- if eq .scs_cred_type "ssh" $)
     private_key: ((($ .scs_cred_path $).ssh_key))
     ($- end $)
+    ($- if ne .stack_version_type "tag" $)
     paths:
       - ($ .stack_path $)/terraform/*
+    ($- end $)
 
 # The Terraform config (will be merged with the stack)
 - name: git_config-terraform

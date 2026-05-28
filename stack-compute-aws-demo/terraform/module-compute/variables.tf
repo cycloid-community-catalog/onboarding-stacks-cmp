@@ -9,6 +9,10 @@ variable "aws_region" {
   description = "AWS region where to deploy the resources."
 }
 
+variable "vpc_id" {
+  description = "VPC ID where to deploy the resources (from environment env_vars)."
+}
+
 # Infra
 variable "vm_instance_type" {
   description = "Instance type to deploy."
@@ -28,20 +32,4 @@ variable "vm_ports_in" {
 variable "vm_os_user" {
   description = "Admin username to connect to instance via SSH. Set to 'admin' because we use debian OS."
   default     = "admin"
-}
-
-variable "res_selector" {
-  description = "Whether to create a new VPC or select an existing one"
-}
-
-variable "vpc_id_inventory" {
-  description = "VPC where to deploy the resources"
-}
-
-variable "vpc_id_aws" {
-  description = "VPC where to deploy the resources"
-}
-
-variable "vpc_id_manual" {
-  description = "VPC where to deploy the resources"
 }

@@ -20,20 +20,18 @@ This automation creates and manages AWS compute resources with the following fea
 
 The stack can be configured through the following parameters:
 
-### AWS Configuration
-- `aws_region`: AWS region for resource deployment (default: eu-west-1)
-- `aws_cred`: AWS credentials (access_key and secret_key)
+### AWS Configuration (managed environment)
+
+Configured on the Cycloid environment, not in StackForms:
+
+- `env_vars.aws_region`: AWS region for resource deployment
+- `env_vars.vpc_id`: VPC where compute resources are deployed
+- Cloud account credentials: attached AWS Cloud Account on the environment
 
 ### Compute Configuration
 - `vm_instance_type`: EC2 instance type
 - `vm_disk_size`: Disk size in GB
 - `vm_ports_in`: List of ingress TCP ports (default: [80, 443])
-
-### VPC Configuration
-- `res_selector`: Selection method for VPC (new or existing)
-- `vpc_id_inventory`: VPC ID from inventory
-- `vpc_id_aws`: VPC ID from AWS
-- `vpc_id_manual`: Manually specified VPC ID
 
 ## Deployment
 
@@ -54,7 +52,7 @@ The stack is designed to be deployed through Cycloid's platform. The deployment 
 
 ## Security
 
-- AWS credentials are managed securely through Cycloid's platform
+- AWS credentials come from the environment's attached Cloud Account
 - Network access is restricted to specified ports
 - VPC configuration allows for network isolation
 
