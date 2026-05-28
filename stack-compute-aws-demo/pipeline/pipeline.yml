@@ -16,7 +16,8 @@ resources:
     backend_config:
       address: '($ .api_url $)/inventory?jwt=($ .inventory_jwt $)'
     vars:
-      vpc_id: ($ .env_vars.vpc_id $)
+      aws_access_key: ($ .environment.provider.aws.credential.access_key $)
+      aws_secret_key: ($ .environment.provider.aws.credential.secret_key $)
       cy_api_key: ((cy_api_key))
       cy_api_url: ($ .api_url $)
       cy_org: ($ .org $)
@@ -156,6 +157,8 @@ jobs:
             path: tfstate
         params:
           vm_instance_status: '((vm_instance_status))'
+          AWS_ACCESS_KEY_ID: ($ .environment.provider.aws.credential.access_key $)
+          AWS_SECRET_ACCESS_KEY: ($ .environment.provider.aws.credential.secret_key $)
 
 
   - name: destroy
