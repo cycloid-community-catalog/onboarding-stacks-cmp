@@ -16,9 +16,10 @@ resources:
     backend_config:
       address: '($ .api_url $)/inventory?jwt=($ .inventory_jwt $)'
     vars:
-      #aws_cred: ($ .environment.provider.aws.credential $)
-      #aws_region: ($ .env_vars.aws_region $)
-      #vpc_id: ($ .env_vars.vpc_id $)
+      aws_access_key: ($ .environment.provider.aws.credential.access_key $)
+      aws_secret_key: ($ .environment.provider.aws.credential.secret_key $)
+      aws_region: ($ .env_vars.aws_region $)
+      vpc_id: ($ .env_vars.vpc_id $)
       cy_api_key: ((cy_api_key))
       cy_api_url: ($ .api_url $)
       cy_org: ($ .org $)
@@ -33,24 +34,23 @@ resources:
   icon: github-circle
   source:
     uri: ($ .scs_url $)
-#    ($- if eq .stack_version_type "tag" $)
-#    tag_filter: ($ .stack_version_ref $)
-#    fetch_tags: true
-#    ($- else $)
-#    branch: ($ coalesce .stack_version_ref .catalog_repository_branch $)
-    branch: aws
-#    ($- end $)
-#    ($- if eq .scs_cred_type "basic_auth" $)
-#    username: ((($ .scs_cred_path $).username))
-#    password: ((($ .scs_cred_path $).password))
-#    ($- end $)
-#    ($- if eq .scs_cred_type "ssh" $)
-#    private_key: ((($ .scs_cred_path $).ssh_key))
-#    ($- end $)
-#    ($- if ne .stack_version_type "tag" $)
-#    paths:
-#      - ($ .stack_path $)/terraform/*
-#    ($- end $)
+    ($- if eq .stack_version_type "tag" $)
+    tag_filter: ($ .stack_version_ref $)
+    fetch_tags: true
+    ($- else $)
+    branch: ($ coalesce .stack_version_ref .catalog_repository_branch $)
+    ($- end $)
+    ($- if eq .scs_cred_type "basic_auth" $)
+    username: ((($ .scs_cred_path $).username))
+    password: ((($ .scs_cred_path $).password))
+    ($- end $)
+    ($- if eq .scs_cred_type "ssh" $)
+    private_key: ((($ .scs_cred_path $).ssh_key))
+    ($- end $)
+    ($- if ne .stack_version_type "tag" $)
+    paths:
+      - ($ .stack_path $)/terraform/*
+    ($- end $)
 
 # The Terraform config (will be merged with the stack)
 - name: git_config-terraform
@@ -159,9 +159,9 @@ jobs:
             path: tfstate
         params:
           vm_instance_status: '((vm_instance_status))'
-          #AWS_ACCESS_KEY_ID: ($ .environment.provider.aws.credential.access_key $)
-          #AWS_SECRET_ACCESS_KEY: ($ .environment.provider.aws.credential.secret_key $)
-          #AWS_DEFAULT_REGION: ($ .env_vars.aws_region $)
+          AWS_ACCESS_KEY_ID: ($ .environment.provider.aws.credential.access_key $)
+          AWS_SECRET_ACCESS_KEY: ($ .environment.provider.aws.credential.secret_key $)
+          AWS_DEFAULT_REGION: ($ .env_vars.aws_region $)
 
 
   - name: destroy
