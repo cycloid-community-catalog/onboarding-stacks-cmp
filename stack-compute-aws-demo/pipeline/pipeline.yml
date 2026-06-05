@@ -16,8 +16,9 @@ resources:
     backend_config:
       address: '($ .api_url $)/inventory?jwt=($ .inventory_jwt $)'
     vars:
-      aws_region: ($ .environment.variables.aws_region $)
-      vpc_id: ($ .environment.variables.vpc_id $)
+      aws_cred: ($ .environment_provider.aws.credential $)
+      aws_region: ($ .environment_variables.aws_region $)
+      vpc_id: ($ .environment_variables.vpc_id $)
       cy_api_key: ((cy_api_key))
       cy_api_url: ($ .api_url $)
       cy_org: ($ .org $)
@@ -157,7 +158,7 @@ jobs:
             path: tfstate
         params:
           vm_instance_status: '((vm_instance_status))'
-          AWS_DEFAULT_REGION: ($ .environment.variables.aws_region $)
+          AWS_DEFAULT_REGION: ($ .environment_variables.aws_region $)
 
 
   - name: destroy

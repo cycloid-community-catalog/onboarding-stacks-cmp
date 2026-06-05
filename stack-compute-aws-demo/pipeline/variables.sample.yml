@@ -1,8 +1,8 @@
 #
 # AWS credentials and region are provided by the managed environment:
-# - Cloud account (aws): environment.provider.aws
-# - Region: env_vars.aws_region
-# - VPC ID: env_vars.vpc_id
+# - Cloud account (aws): environment_provider.aws
+# - Region: environment_variables.aws_region
+# - VPC ID: environment_variables.vpc_id
 #
 
 #
