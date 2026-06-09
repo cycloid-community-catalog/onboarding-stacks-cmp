@@ -90,21 +90,6 @@ use_cases:
         type: string
         required: true
 
-    - name: Access Configuration
-      technologies: [pipeline]
-      vars:
-      - name: "Azure Subscription"
-        description: "The azure subscription used to deploy the infrastructure. It contains subscription_id, tenant_id, client_id, and client_secret."
-        key: azure_cred
-        widget: cy_cred
-        widget_config:
-          display_keys: false
-          cred_types:
-            - azure
-        type: string
-        default: "((azure))"
-        required: true
-
     - name: Day-2 Operations
       technologies: [pipeline]
       vars:

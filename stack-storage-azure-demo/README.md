@@ -27,9 +27,11 @@ The stack includes the following features:
 - **HTTPS Only**: Enable/disable HTTPS-only traffic
 - **Containers**: Configure multiple containers with different access types
 
-### Azure Configuration
-- Azure credentials (client ID, client secret, tenant ID, subscription ID)
-- Region selection
+### Azure Configuration (managed environment)
+
+Configured on the Cycloid environment, not in StackForms:
+
+- Cloud account credentials: attached Azure Cloud Account on the environment (`env_providers.azure`)
 
 ## Deployment
 

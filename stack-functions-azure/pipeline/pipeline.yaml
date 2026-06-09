@@ -16,7 +16,7 @@ resources:
     backend_config:
       address: '($ .api_url $)/inventory?jwt=($ .inventory_jwt $)'
     vars:
-      azure_cred: ((azure_cred))
+      azure_cred: ($ .env_providers.azure.credential $)
       cy_org: ($ .org $)
       cy_project: ($ .project $)
       cy_env: ($ .env $)
@@ -159,7 +159,7 @@ jobs:
           CY_ENV: ($ .env $)
           CY_PROJECT: ($ .project $)
           CY_ORG: ($ .org $)
-          AZURE_CRED: ((azure_cred))
+          AZURE_CRED: ($ .env_providers.azure.credential $)
 
 
   # Destroy the infrastructure

@@ -24,9 +24,11 @@ The stack includes the following features:
 - **Azure Location**: Region where the resource group will be created
 - **Custom Tags**: Optional custom tags to apply to the resource group
 
-### Azure Configuration
-- Azure credentials (client ID, client secret, tenant ID, subscription ID)
-- Region selection
+### Azure Configuration (managed environment)
+
+Configured on the Cycloid environment, not in StackForms:
+
+- Cloud account credentials: attached Azure Cloud Account on the environment (`env_providers.azure`)
 
 ## Deployment
 

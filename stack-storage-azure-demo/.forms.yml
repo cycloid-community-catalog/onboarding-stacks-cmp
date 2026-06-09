@@ -115,19 +115,3 @@ use_cases:
             type: azurerm_resource_group
         type: string
         required: true
-
-
-    - name: Azure Subscription
-      technologies: [pipeline]
-      vars:
-      - name: "Azure Subscription"
-        description: "The Azure subscription to use for deployment"
-        key: azure_cred
-        widget: cy_cred
-        widget_config:
-          display_keys: false
-          cred_types:
-            - azure
-        type: string
-        default: "((azure))"
-        required: true

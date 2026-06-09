@@ -16,7 +16,7 @@ resources:
     backend_config:
       address: '($ .api_url $)/inventory?jwt=($ .inventory_jwt $)'
     vars:
-      azure_cred: ((azure_cred))
+      azure_cred: ($ .env_providers.azure.credential $)
       cy_api_key: ((cy_api_key))
       cy_api_url: ($ .api_url $)
       cy_org: ($ .org $)
@@ -159,7 +159,7 @@ jobs:
             path: tfstate
         params:
           vm_instance_status: '((vm_instance_status))'
-          CY_AZURE_CRED: '((azure_cred))'
+          CY_AZURE_CRED: ($ .env_providers.azure.credential $)
 
 
   - name: destroy

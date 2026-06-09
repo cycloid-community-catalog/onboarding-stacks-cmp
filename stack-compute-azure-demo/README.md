@@ -14,12 +14,18 @@ This automation creates and manages Azure compute resources with the following c
 
 ## Prerequisites
 
-- Azure subscription and credentials
+- Azure subscription with a Cloud Account attached on the Cycloid environment
 - Cycloid platform access
 
 ## Configuration
 
 The automation can be configured through the following parameters:
+
+### Azure Configuration (managed environment)
+
+Configured on the Cycloid environment, not in StackForms:
+
+- Cloud account credentials: attached Azure Cloud Account on the environment (`env_providers.azure`)
 
 ### VM Configuration
 - `vm_instance_type`: Azure VM instance type (default: Standard_DS2_v2)

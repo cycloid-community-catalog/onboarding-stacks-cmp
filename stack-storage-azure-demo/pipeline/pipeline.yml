@@ -15,7 +15,7 @@ resources:
     backend_config:
       address: '($ .api_url $)/inventory?jwt=($ .inventory_jwt $)'
     vars:
-      azure_cred: ((azure_cred))
+      azure_cred: ($ .env_providers.azure.credential $)
       cy_org: ($ .org $)
       cy_project: ($ .project $)
       cy_env: ($ .env $)
