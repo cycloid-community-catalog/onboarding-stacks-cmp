@@ -40,8 +40,10 @@ resources:
     ($- if eq .scs_cred_type "ssh" $)
     private_key: ((($ .scs_cred_path $).ssh_key))
     ($- end $)
+    ($- if ne .stack_version_type "tag" $)
     paths:
       - ($ .stack_path $)/terraform/*
+    ($- end $)
 
 # The Terraform config (will be merged with the stack)
 - name: git_config-terraform
