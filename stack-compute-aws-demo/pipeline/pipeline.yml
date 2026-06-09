@@ -16,9 +16,8 @@ resources:
     backend_config:
       address: '($ .api_url $)/inventory?jwt=($ .inventory_jwt $)'
     vars:
-      aws_cred:
-        access_key: ($ .env_providers.aws.credential.access_key $)
-        secret_key: ($ .env_providers.aws.credential.secret_key $)
+      aws_access_key: ($ .env_providers.aws.credential.access_key $)
+      aws_secret_key: ($ .env_providers.aws.credential.secret_key $)
       aws_region: ($ .env_vars.aws_region $)
       vpc_id: ($ .env_vars.vpc_id $)
       cy_api_key: ((cy_api_key))
@@ -161,6 +160,8 @@ jobs:
         params:
           vm_instance_status: '((vm_instance_status))'
           AWS_DEFAULT_REGION: ($ .env_vars.aws_region $)
+          AWS_ACCESS_KEY_ID: ($ .env_providers.aws.credential.access_key $)
+          AWS_SECRET_ACCESS_KEY: ($ .env_providers.aws.credential.secret_key $)
 
 
   - name: destroy
