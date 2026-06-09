@@ -1,6 +1,6 @@
 #
 # AWS credentials and region are provided by the managed environment:
-# - Cloud account (aws): env_providers.aws.credential (access_key, secret_key)
+# - Cloud account (aws): env_providers.aws.access_key, env_providers.aws.secret_key
 # - Region: env_vars.aws_region
 #
 

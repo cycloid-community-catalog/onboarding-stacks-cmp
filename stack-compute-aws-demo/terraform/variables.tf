@@ -5,12 +5,13 @@ variable "cy_env" {}
 variable "cy_component" {}
 
 # AWS variables
-variable "aws_cred" {
-  description = "AWS credentials from the environment cloud account (access_key, secret_key)."
-  type = object({
-    access_key = string
-    secret_key = string
-  })
+variable "aws_access_key" {
+  description = "AWS access key from the environment cloud account."
+  sensitive   = true
+}
+variable "aws_secret_key" {
+  description = "AWS secret key from the environment cloud account."
+  sensitive   = true
 }
 variable "aws_region" {
   description = "AWS region where to create servers."

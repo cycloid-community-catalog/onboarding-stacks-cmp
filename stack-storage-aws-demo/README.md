@@ -25,9 +25,12 @@ The stack includes the following features:
 - **Versioning**: Enable/disable versioning for the bucket
 - **Lifecycle Rules**: Configure lifecycle rules for object management
 
-### AWS Configuration
-- AWS credentials (access key and secret key)
-- Region selection
+### AWS Configuration (managed environment)
+
+Configured on the Cycloid environment, not in StackForms:
+
+- `env_providers.aws.access_key` / `env_providers.aws.secret_key`: from the attached AWS Cloud Account
+- `env_vars.aws_region`: AWS region for resource deployment
 
 ## Deployment
 

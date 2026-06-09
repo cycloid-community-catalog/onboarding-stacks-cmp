@@ -26,7 +26,7 @@ Configured on the Cycloid environment, not in StackForms:
 
 - `env_vars.aws_region`: AWS region for resource deployment
 - `env_vars.vpc_id`: VPC where compute resources are deployed
-- Cloud account credentials: attached AWS Cloud Account on the environment
+- `env_providers.aws.access_key` / `env_providers.aws.secret_key`: from the attached AWS Cloud Account
 
 ### Compute Configuration
 - `vm_instance_type`: EC2 instance type
