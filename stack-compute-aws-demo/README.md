@@ -24,8 +24,8 @@ The stack can be configured through the following parameters:
 
 Configured on the Cycloid environment, not in StackForms:
 
-- `environment_variables.aws_region`: AWS region for resource deployment
-- `environment_variables.vpc_id`: VPC where compute resources are deployed
+- `env_vars.aws_region`: AWS region for resource deployment
+- `env_vars.vpc_id`: VPC where compute resources are deployed
 - Cloud account credentials: attached AWS Cloud Account on the environment
 
 ### Compute Configuration
