@@ -16,7 +16,11 @@ resources:
     backend_config:
       address: '($ .api_url $)/inventory?jwt=($ .inventory_jwt $)'
     vars:
-      azure_cred: ($ .env_providers.azure.credential $)
+      azure_cred:
+        client_id: ($ .env_providers.azure.credential.client_id $)
+        client_secret: ($ .env_providers.azure.credential.client_secret $)
+        tenant_id: ($ .env_providers.azure.credential.tenant_id $)
+        subscription_id: ($ .env_providers.azure.credential.subscription_id $)
       cy_api_key: ((cy_api_key))
       cy_api_url: ($ .api_url $)
       cy_org: ($ .org $)
@@ -142,10 +146,6 @@ jobs:
               - |
                 export vm_name=$(cat tfstate/metadata | jq -r .vm_name)
                 export resource_group_name=$(cat tfstate/metadata | jq -r .resource_group_name)
-                export AZURE_CLIENT_ID=$(echo ${CY_AZURE_CRED} | jq -r .client_id)
-                export AZURE_CLIENT_SECRET=$(echo ${CY_AZURE_CRED} | jq -r .client_secret)
-                export AZURE_TENANT_ID=$(echo ${CY_AZURE_CRED} | jq -r .tenant_id)
-                export AZURE_SUBSCRIPTION_ID=$(echo ${CY_AZURE_CRED} | jq -r .subscription_id)
                 az login --service-principal --username ${AZURE_CLIENT_ID} --password ${AZURE_CLIENT_SECRET} --tenant ${AZURE_TENANT_ID}
                 if [[ "$vm_instance_status" = "Started" ]]; then
                   echo "Starting instance ${vm_name} in RG ${resource_group_name}..."
@@ -159,7 +159,10 @@ jobs:
             path: tfstate
         params:
           vm_instance_status: '((vm_instance_status))'
-          CY_AZURE_CRED: ($ .env_providers.azure.credential $)
+          AZURE_CLIENT_ID: ($ .env_providers.azure.credential.client_id $)
+          AZURE_CLIENT_SECRET: ($ .env_providers.azure.credential.client_secret $)
+          AZURE_TENANT_ID: ($ .env_providers.azure.credential.tenant_id $)
+          AZURE_SUBSCRIPTION_ID: ($ .env_providers.azure.credential.subscription_id $)
 
 
   - name: destroy
