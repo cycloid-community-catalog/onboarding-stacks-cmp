@@ -16,7 +16,9 @@ resources:
     backend_config:
       address: '($ .api_url $)/inventory?jwt=($ .inventory_jwt $)'
     vars:
-      aws_cred: ($ .env_providers.aws.credential $)
+      aws_cred:
+        access_key: ($ .env_providers.aws.credential.access_key $)
+        secret_key: ($ .env_providers.aws.credential.secret_key $)
       aws_region: ($ .env_vars.aws_region $)
       cy_org: ($ .org $)
       cy_project: ($ .project $)
