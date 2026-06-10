@@ -25,7 +25,7 @@ The automation can be configured through the following parameters:
 
 Configured on the Cycloid environment, not in StackForms:
 
-- `env_providers.azure.client_id` / `client_secret` / `tenant_id` / `subscription_id`: from the attached Azure Cloud Account
+- `env_providers.azurerm.client_id` / `client_secret` / `tenant_id` / `subscription_id`: from the attached Azure Cloud Account
 
 ### VM Configuration
 - `vm_instance_type`: Azure VM instance type (default: Standard_DS2_v2)

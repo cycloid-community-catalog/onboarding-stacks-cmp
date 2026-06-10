@@ -31,7 +31,7 @@ The stack includes the following features:
 
 Configured on the Cycloid environment, not in StackForms:
 
-- `env_providers.azure.client_id` / `client_secret` / `tenant_id` / `subscription_id`: from the attached Azure Cloud Account
+- `env_providers.azurerm.client_id` / `client_secret` / `tenant_id` / `subscription_id`: from the attached Azure Cloud Account
 
 ## Deployment
 

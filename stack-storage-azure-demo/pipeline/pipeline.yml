@@ -15,10 +15,10 @@ resources:
     backend_config:
       address: '($ .api_url $)/inventory?jwt=($ .inventory_jwt $)'
     vars:
-      azure_client_id: ($ .env_providers.azure.client_id $)
-      azure_client_secret: ($ .env_providers.azure.client_secret $)
-      azure_tenant_id: ($ .env_providers.azure.tenant_id $)
-      azure_subscription_id: ($ .env_providers.azure.subscription_id $)
+      azure_client_id: ($ .env_providers.azurerm.client_id $)
+      azure_client_secret: ($ .env_providers.azurerm.client_secret $)
+      azure_tenant_id: ($ .env_providers.azurerm.tenant_id $)
+      azure_subscription_id: ($ .env_providers.azurerm.subscription_id $)
       cy_org: ($ .org $)
       cy_project: ($ .project $)
       cy_env: ($ .env $)
