@@ -16,7 +16,7 @@ resources:
     backend_config:
       address: '($ .api_url $)/inventory?jwt=($ .inventory_jwt $)'
     vars:
-      gcp_credentials_json: ($ .env_providers.gcp.json_key $)
+      gcp_credentials_json: ($ .env_providers.gcp.credential.json_key $)
       gcp_project: ($ .env_vars.gcp_project $)
       gcp_region: ($ .env_vars.gcp_region $)
       gcp_zone: ($ .env_vars.gcp_zone $)
@@ -30,7 +30,7 @@ resources:
       GOOGLE_PROJECT: ($ .env_vars.gcp_project $)
       GOOGLE_REGION: ($ .env_vars.gcp_region $)
       GOOGLE_ZONE: ($ .env_vars.gcp_zone $)
-      GOOGLE_CREDENTIALS: ($ .env_providers.gcp.json_key $)
+      GOOGLE_CREDENTIALS: ($ .env_providers.gcp.credential.json_key $)
 
 
 # The Terraform stack (will be merged with the config)
