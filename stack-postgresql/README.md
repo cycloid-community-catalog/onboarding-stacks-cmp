@@ -14,21 +14,33 @@ This automation creates and manages PostgreSQL database deployments with the fol
 
 ## Prerequisites
 
-- Access to a cloud provider (AWS, Azure, or GCP)
+- Cloud Account attached on the Cycloid environment (AWS, Azure, or GCP depending on use case)
 - Cycloid platform access
 
 ## Configuration
 
 The stack can be configured through the following parameters:
 
-### AWS Configuration
-- `aws_region`: AWS region for resource deployment
+### AWS Configuration (managed environment)
+
+Configured on the Cycloid environment, not in StackForms:
+
+- `env_providers.aws.access_key` / `env_providers.aws.secret_key`: from the attached AWS Cloud Account
+- `env_vars.aws_region`: AWS region for resource deployment
+
+### AWS StackForms
 - `rds_engine_version`: PostgreSQL engine version (default: 17.4)
 - `rds_instance_class`: RDS instance type (default: db.t4g.micro)
 - `rds_allocated_storage`: Storage size in GB (default: 20)
 - `rds_snapshot_identifier`: Optional snapshot ID for database restoration
 
-### Azure Configuration
+### Azure Configuration (managed environment)
+
+Configured on the Cycloid environment, not in StackForms:
+
+- `env_providers.azurerm.client_id` / `client_secret` / `tenant_id` / `subscription_id`: from the attached Azure Cloud Account
+
+### Azure StackForms
 - `server_name`: Name of the PostgreSQL Flexible Server
 - `postgresql_version`: PostgreSQL version (default: 14)
 - `administrator_login`: Administrator login username
@@ -38,7 +50,16 @@ The stack can be configured through the following parameters:
 - `geo_redundant_backup_enabled`: Enable geo-redundant backups
 - `database_name`: Name of the database to create
 
-### GCP Configuration
+### GCP Configuration (managed environment)
+
+Configured on the Cycloid environment, not in StackForms:
+
+- `env_providers.google.json_key`: GCP service account JSON key from the attached Cloud Account
+- `env_vars.gcp_project`: GCP project ID
+- `env_vars.gcp_region`: GCP region for deployment
+- `env_vars.gcp_zone`: GCP zone for deployment
+
+### GCP StackForms
 - `project_id`: GCP project ID
 - `region`: GCP region for deployment (default: europe-west1)
 - `instance_name`: Name of the Cloud SQL instance

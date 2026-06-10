@@ -5,8 +5,18 @@ variable "cy_env" {}
 variable "cy_component" {}
 
 # Cloud variables
-variable "azure_cred" {
-  description = "The azure credential used to deploy the infrastructure. It contains subscription_id, tenant_id, client_id, and client_secret"
+variable "azure_client_id" {
+  description = "Azure client ID from the environment cloud account."
+}
+variable "azure_client_secret" {
+  description = "Azure client secret from the environment cloud account."
+  sensitive   = true
+}
+variable "azure_tenant_id" {
+  description = "Azure tenant ID from the environment cloud account."
+}
+variable "azure_subscription_id" {
+  description = "Azure subscription ID from the environment cloud account."
 }
 
 # Cycloid
