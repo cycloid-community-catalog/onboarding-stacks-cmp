@@ -16,11 +16,10 @@ resources:
     backend_config:
       address: '($ .api_url $)/inventory?jwt=($ .inventory_jwt $)'
     vars:
-      azure_cred:
-        client_id: ($ .env_providers.azure.credential.client_id $)
-        client_secret: ($ .env_providers.azure.credential.client_secret $)
-        tenant_id: ($ .env_providers.azure.credential.tenant_id $)
-        subscription_id: ($ .env_providers.azure.credential.subscription_id $)
+      azure_client_id: ($ .env_providers.azure.client_id $)
+      azure_client_secret: ($ .env_providers.azure.client_secret $)
+      azure_tenant_id: ($ .env_providers.azure.tenant_id $)
+      azure_subscription_id: ($ .env_providers.azure.subscription_id $)
       cy_api_key: ((cy_api_key))
       cy_api_url: ($ .api_url $)
       cy_org: ($ .org $)
@@ -159,10 +158,10 @@ jobs:
             path: tfstate
         params:
           vm_instance_status: '((vm_instance_status))'
-          AZURE_CLIENT_ID: ($ .env_providers.azure.credential.client_id $)
-          AZURE_CLIENT_SECRET: ($ .env_providers.azure.credential.client_secret $)
-          AZURE_TENANT_ID: ($ .env_providers.azure.credential.tenant_id $)
-          AZURE_SUBSCRIPTION_ID: ($ .env_providers.azure.credential.subscription_id $)
+          AZURE_CLIENT_ID: ($ .env_providers.azure.client_id $)
+          AZURE_CLIENT_SECRET: ($ .env_providers.azure.client_secret $)
+          AZURE_TENANT_ID: ($ .env_providers.azure.tenant_id $)
+          AZURE_SUBSCRIPTION_ID: ($ .env_providers.azure.subscription_id $)
 
 
   - name: destroy
