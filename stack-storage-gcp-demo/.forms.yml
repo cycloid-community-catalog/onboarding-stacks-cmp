@@ -70,34 +70,3 @@ use_cases:
             ]
           }
         required: true
-
-    - name: GCP Provider Configuration
-      technologies: [pipeline]
-      vars:
-      - name: "Project ID"
-        description: "The GCP project ID where resources will be created"
-        key: gcp_project
-        widget: simple_text
-        type: string
-        required: true
-
-      - name: "Region"
-        description: "The GCP region for the provider"
-        key: gcp_region
-        widget: auto_complete
-        type: string
-        default: "europe-west1"
-        values_ref: https://cycloid-demo-stackforms-values.s3.eu-west-1.amazonaws.com/gcp-regions.json
-        required: true
-
-      - name: "GCP Credentials"
-        description: "The GCP credentials to use for deployment"
-        key: gcp_cred
-        widget: cy_cred
-        widget_config:
-          display_keys: false
-          cred_types:
-            - gcp
-        type: string
-        default: "((gcp))"
-        required: true 

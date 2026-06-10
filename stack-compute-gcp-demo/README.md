@@ -12,17 +12,21 @@ This automation creates and manages GCP compute resources with the following fea
 
 ## Prerequisites
 
-- GCP project with appropriate credentials
+- GCP project with a Cloud Account attached on the Cycloid environment
 - Cycloid platform access
 
 ## Configuration
 
 The stack can be configured through the following parameters:
 
-### GCP Configuration
-- `gcp_credentials_json`: GCP service account credentials in JSON format
-- `gcp_project`: GCP project ID
-- `gcp_region`: GCP region for resource deployment
+### GCP Configuration (managed environment)
+
+Configured on the Cycloid environment, not in StackForms:
+
+- `env_providers.gcp.json_key`: GCP service account JSON key from the attached Cloud Account
+- `env_vars.gcp_project`: GCP project ID
+- `env_vars.gcp_region`: GCP region for resource deployment
+- `env_vars.gcp_zone`: GCP zone for resource deployment
 
 ### Compute Configuration
 - `vm_machine_type`: Compute Engine machine type (default: n2-standard-2)
