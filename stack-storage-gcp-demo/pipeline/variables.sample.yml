@@ -1,6 +1,6 @@
 #
 # GCP credentials and project settings are provided by the managed environment:
-# - Cloud account (gcp): env_providers.gcp.json_key
+# - Cloud account (google): env_providers.google.json_key
 # - Project: env_vars.gcp_project
 # - Region: env_vars.gcp_region
 #
