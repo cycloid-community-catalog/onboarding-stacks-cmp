@@ -85,6 +85,16 @@ use_cases:
         type: array
         required: true
 
+    - name: Environment
+      technologies: [pipeline]
+      vars:
+      - name: "AWS Region"
+        description: "AWS region from environment configuration (used to filter subnet inventory)."
+        key: aws_region
+        widget: hidden
+        type: string
+        default: "($ .env_vars.aws_region $)"
+
     - name: Day-2 Operations
       technologies: [pipeline]
       vars:
