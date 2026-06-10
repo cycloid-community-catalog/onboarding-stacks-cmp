@@ -1,21 +1,19 @@
 #
 # Cloud credentials and settings are provided by the managed environment.
 #
-
-($ if eq .use_case "aws" $)
+# AWS use case:
 # - Cloud account (aws): env_providers.aws.access_key, env_providers.aws.secret_key
 # - Region: env_vars.aws_region
-
-($ else if eq .use_case "azure" $)
+#
+# Azure use case:
 # - Cloud account (azurerm): env_providers.azurerm.client_id, client_secret, tenant_id, subscription_id
-
-($ else if eq .use_case "gcp" $)
+#
+# GCP use case:
 # - Cloud account (google): env_providers.google.json_key
 # - Project: env_vars.gcp_project
 # - Region: env_vars.gcp_region
 # - Zone: env_vars.gcp_zone
-
-($ end $)
+#
 
 #
 # Day 2 CLI Operations
