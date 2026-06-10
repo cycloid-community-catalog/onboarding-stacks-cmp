@@ -12,9 +12,9 @@ module "rds" {
   #+ AWS region where to deploy the resoureces
   aws_region = var.aws_region
 
-  #. rds_engine_version: '17.4'
+  #. rds_engine_version: '17.10'
   #+ The PostgreSQL engine version to use.
-  rds_engine_version = "17.4"
+  rds_engine_version = "17.10"
 
   #. rds_instance_class: 'db.t4g.micro'
   #+ The instance type of the RDS instance.

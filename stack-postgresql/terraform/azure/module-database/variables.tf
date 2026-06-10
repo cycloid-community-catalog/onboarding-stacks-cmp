@@ -12,7 +12,7 @@ variable "server_name" {
 variable "postgresql_version" {
   description = "PostgreSQL version"
   type        = string
-  default     = "14"
+  default     = "17"
 }
 
 variable "administrator_login" {

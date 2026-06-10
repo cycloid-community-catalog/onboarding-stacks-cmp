@@ -16,7 +16,7 @@ module "database" {
   #+ Name of the Cloud SQL instance
   instance_name = ""
 
-  #. postgresql_version: 'POSTGRES_15'
+  #. postgresql_version: 'POSTGRES_17'
   #+ PostgreSQL version
   postgresql_version = ""
 

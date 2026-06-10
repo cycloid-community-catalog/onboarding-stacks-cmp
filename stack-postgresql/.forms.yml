@@ -13,8 +13,8 @@ use_cases:
         key: rds_engine_version
         widget: auto_complete
         type: string
-        default: "17.4"
-        values: ["17.4","17.3","17.2","17.1","16.8","16.7","16.6","16.5","16.4","16.3","16.2","16.1","16.0"]
+        default: "17.10"
+        values: ["18.4","18.3","18.2","18.1","17.10","17.9","17.8","17.7","17.6","17.5","17.4","16.14","16.13","16.12","16.11","16.10","15.18","15.17","15.16","15.15","14.23","14.22","13.23"]
         required: true
       - name: "Instance Class"
         description: "Instance class for the RDS instance."
@@ -116,8 +116,8 @@ use_cases:
         key: postgresql_version
         widget: dropdown
         type: string
-        default: "14"
-        values: ["14","13","12","11"]
+        default: "17"
+        values: ["18","17","16","15","14","13","12","11"]
         required: true
       - name: "SKU Name"
         description: "SKU name for the PostgreSQL Flexible Server."
@@ -250,8 +250,8 @@ use_cases:
         key: postgresql_version 
         widget: dropdown
         type: string
-        values: ["POSTGRES_14", "POSTGRES_13", "POSTGRES_12"]
-        default: "POSTGRES_14"
+        values: ["POSTGRES_18", "POSTGRES_17", "POSTGRES_16", "POSTGRES_15", "POSTGRES_14", "POSTGRES_13", "POSTGRES_12"]
+        default: "POSTGRES_17"
         required: true
       - name: "Machine Type"
         description: "Cloud SQL machine type."

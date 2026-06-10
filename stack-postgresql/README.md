@@ -29,7 +29,7 @@ Configured on the Cycloid environment, not in StackForms:
 - `env_vars.aws_region`: AWS region for resource deployment
 
 ### AWS StackForms
-- `rds_engine_version`: PostgreSQL engine version (default: 17.4)
+- `rds_engine_version`: PostgreSQL engine version (default: 17.10, supported: 13.23–18.4)
 - `rds_instance_class`: RDS instance type (default: db.t4g.micro)
 - `rds_allocated_storage`: Storage size in GB (default: 20)
 - `rds_snapshot_identifier`: Optional snapshot ID for database restoration
@@ -42,7 +42,7 @@ Configured on the Cycloid environment, not in StackForms:
 
 ### Azure StackForms
 - `server_name`: Name of the PostgreSQL Flexible Server
-- `postgresql_version`: PostgreSQL version (default: 14)
+- `postgresql_version`: PostgreSQL version (default: 17, supported: 11–18)
 - `administrator_login`: Administrator login username
 - `storage_mb`: Storage size in MB (default: 32768)
 - `sku_name`: SKU name for the server (default: B_Standard_B1ms)
@@ -63,7 +63,7 @@ Configured on the Cycloid environment, not in StackForms:
 - `project_id`: GCP project ID
 - `region`: GCP region for deployment (default: europe-west1)
 - `instance_name`: Name of the Cloud SQL instance
-- `postgresql_version`: PostgreSQL version (default: POSTGRES_14)
+- `postgresql_version`: PostgreSQL version (default: POSTGRES_17, supported: POSTGRES_12–POSTGRES_18)
 - `machine_type`: Cloud SQL instance type (default: db-f1-micro)
 - `disk_size`: Storage size in GB (default: 10)
 - `disk_type`: Storage type (PD_SSD or PD_HDD, default: PD_SSD)

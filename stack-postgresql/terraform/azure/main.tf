@@ -12,9 +12,9 @@ module "database" {
   #+ Name of the PostgreSQL Flexible Server
   server_name = ""
 
-  #. postgresql_version: 14
+  #. postgresql_version: 17
   #+ Version of PostgreSQL to use
-  postgresql_version = 14
+  postgresql_version = 17
 
   #. administrator_login: 'psqladmin'
   #+ Administrator login for PostgreSQL server
