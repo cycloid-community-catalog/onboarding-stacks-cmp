@@ -1,0 +1,11 @@
+description: "Open Adminer in a component tab, auto-connected to PostgreSQL from Terraform outputs."
+icon: "https://www.adminer.org/favicon.ico"
+
+configuration:
+  - name: "Database port"
+    description: "Default PostgreSQL port when the Terraform output does not include one."
+    key: db_port
+    widget: simple_text
+    type: string
+    default: "5432"
+    required: true
