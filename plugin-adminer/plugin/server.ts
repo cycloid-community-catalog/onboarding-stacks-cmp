@@ -1,5 +1,6 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { request as httpRequest } from "node:http";
+import { request as httpsRequest } from "node:https";
 
 const port = Number(process.env.PORT);
 if (!Number.isFinite(port) || port <= 0) {
@@ -10,6 +11,22 @@ if (!Number.isFinite(port) || port <= 0) {
 const DB_PORT = process.env.DB_PORT?.trim() || "5432";
 const ADMINER_PORT = process.env.ADMINER_PORT?.trim() || "8081";
 const ADMINER_ORIGIN = `http://127.0.0.1:${ADMINER_PORT}`;
+const PROXY_URL = process.env.PROXY_URL?.trim().replace(/\/$/, "") ?? "";
+const PLUGIN_SECRET = process.env.PLUGIN_SECRET?.trim() ?? "";
+const CY_API_URL = process.env.CY_API_URL?.trim().replace(/\/$/, "") ?? "";
+const CY_API_KEY = process.env.CY_API_KEY?.trim() ?? "";
+
+function apiModeLabel(): string {
+  if (PROXY_URL) {
+    return `proxy (${PROXY_URL}, secret=${PLUGIN_SECRET ? "set" : "empty"})`;
+  }
+  if (CY_API_URL && CY_API_KEY) {
+    return `direct (${CY_API_URL})`;
+  }
+  return "not configured";
+}
+
+console.log(`[INFO] cycloid api: ${apiModeLabel()}`);
 
 type ComponentCtx = {
   org: string;
@@ -158,25 +175,37 @@ function resolveDbConfig(outputs: Map<string, unknown>): DbConfig | null {
   };
 }
 
-async function cycloidGet(path: string): Promise<{ status: number; body: string }> {
-  const proxyUrl = process.env.PROXY_URL?.replace(/\/$/, "");
-  const secret = process.env.PLUGIN_SECRET;
-  if (!proxyUrl || !secret) {
-    throw new Error("PROXY_URL or PLUGIN_SECRET is not configured");
-  }
+function cycloidApiError(): string {
+  return [
+    "Cannot reach the Cycloid API to read Terraform outputs.",
+    "",
+    "Expected (injected by Plugin Manager at install time):",
+    "  PROXY_URL=<plugin-manager-proxy>",
+    "  PLUGIN_SECRET=<per-plugin-secret>  (may be empty if PLUGIN_TOKEN_SECRET is unset)",
+    "",
+    "Workaround: reinstall the plugin with install-form fields:",
+    "  cy_api_url  — e.g. https://http-api.cycloid.io",
+    "  cy_api_key  — org API key with inventory output read access",
+    "",
+    "Platform admin: ensure Plugin Manager has HOST_API_BASE_URL and CY_TOKEN_SECRET configured,",
+    "then restart Plugin Manager and reinstall this plugin.",
+  ].join("\n");
+}
 
-  const url = new URL(path, proxyUrl);
-  url.searchParams.set("secret", secret);
-
+function httpGet(
+  target: URL,
+  headers: Record<string, string>,
+): Promise<{ status: number; body: string }> {
   return new Promise((resolve, reject) => {
-    const target = new URL(url.toString());
-    const req = httpRequest(
+    const isHttps = target.protocol === "https:";
+    const request = isHttps ? httpsRequest : httpRequest;
+    const req = request(
       {
         hostname: target.hostname,
-        port: target.port || 80,
+        port: target.port || (isHttps ? 443 : 80),
         path: `${target.pathname}${target.search}`,
         method: "GET",
-        headers: { accept: "application/json" },
+        headers: { accept: "application/json", ...headers },
       },
       (res) => {
         const chunks: Buffer[] = [];
@@ -192,6 +221,23 @@ async function cycloidGet(path: string): Promise<{ status: number; body: string 
     req.on("error", reject);
     req.end();
   });
+}
+
+async function cycloidGet(path: string): Promise<{ status: number; body: string }> {
+  if (PROXY_URL) {
+    const url = new URL(path, PROXY_URL);
+    if (PLUGIN_SECRET) {
+      url.searchParams.set("secret", PLUGIN_SECRET);
+    }
+    return httpGet(url, {});
+  }
+
+  if (CY_API_URL && CY_API_KEY) {
+    const url = new URL(path, CY_API_URL);
+    return httpGet(url, { authorization: `Bearer ${CY_API_KEY}` });
+  }
+
+  throw new Error(cycloidApiError());
 }
 
 function matchesComponent(output: InventoryOutput, ctx: ComponentCtx): boolean {
