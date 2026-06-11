@@ -26,6 +26,6 @@ variable "cy_api_url" {
 
 variable "cy_api_key" {
   type        = string
-  description = "Org JWT used for authentication"
+  description = "Org API key used for authentication"
   sensitive   = true
 }

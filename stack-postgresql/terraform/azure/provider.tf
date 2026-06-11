@@ -10,7 +10,7 @@ provider "azurerm" {
 provider "random" {}
 
 provider "cycloid" {
-  organization_canonical = var.cy_org
-  jwt                    = var.cy_api_key
-  url                    = var.cy_api_url
+  api_url              = var.cy_api_url
+  api_key              = var.cy_api_key
+  default_organization = var.cy_org
 }

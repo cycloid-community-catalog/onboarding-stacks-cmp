@@ -1,6 +1,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
+import { createConnection } from "node:net";
 
 const port = Number(process.env.PORT);
 if (!Number.isFinite(port) || port <= 0) {
@@ -49,10 +50,63 @@ type DbConfig = {
   username: string;
   password: string;
   database: string;
+  ssl: boolean;
 };
 
-function stripIframePrefix(pathname: string): string {
-  return pathname.replace(/^\/iframe/, "") || "/";
+function normalizePluginPath(pathname: string): string {
+  const iframeIdx = pathname.indexOf("/iframe");
+  if (iframeIdx >= 0) {
+    const rest = pathname.slice(iframeIdx + "/iframe".length);
+    if (!rest || rest === "/") return "/";
+    return rest.startsWith("/") ? rest : `/${rest}`;
+  }
+  return pathname || "/";
+}
+
+const COMPONENT_PATH =
+  /\/organizations\/([^/]+)\/projects\/([^/]+)\/environments\/([^/]+)\/components\/([^/]+)/;
+
+function parseComponentCtxFromPath(pathname: string): ComponentCtx | null {
+  const match = COMPONENT_PATH.exec(pathname);
+  if (!match) return null;
+  return {
+    org: decodeURIComponent(match[1]),
+    project: decodeURIComponent(match[2]),
+    env: decodeURIComponent(match[3]),
+    component: decodeURIComponent(match[4]),
+  };
+}
+
+function parseComponentCtxFromSearch(url: URL): ComponentCtx | null {
+  const org = url.searchParams.get("org")?.trim() ?? "";
+  const project = url.searchParams.get("project")?.trim() ?? "";
+  const env = url.searchParams.get("env")?.trim() ?? "";
+  const component = url.searchParams.get("component")?.trim() ?? "";
+  if (!org || !project || !env || !component) return null;
+  return { org, project, env, component };
+}
+
+function parseComponentCtx(url: URL, req: IncomingMessage, rawPathname: string): ComponentCtx | null {
+  const fromQuery = parseComponentCtxFromSearch(url);
+  if (fromQuery) return fromQuery;
+
+  const fromPath = parseComponentCtxFromPath(rawPathname);
+  if (fromPath) return fromPath;
+
+  const referer = req.headers.referer ?? req.headers.referrer;
+  if (typeof referer === "string" && referer) {
+    try {
+      const ref = new URL(referer);
+      const fromRefQuery = parseComponentCtxFromSearch(ref);
+      if (fromRefQuery) return fromRefQuery;
+      const fromRefPath = parseComponentCtxFromPath(ref.pathname);
+      if (fromRefPath) return fromRefPath;
+    } catch {
+      /* ignore malformed referer */
+    }
+  }
+
+  return null;
 }
 
 function send(
@@ -72,15 +126,6 @@ function escapeHtml(s: string): string {
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;");
-}
-
-function parseComponentCtx(url: URL): ComponentCtx | null {
-  const org = url.searchParams.get("org")?.trim() ?? "";
-  const project = url.searchParams.get("project")?.trim() ?? "";
-  const env = url.searchParams.get("env")?.trim() ?? "";
-  const component = url.searchParams.get("component")?.trim() ?? "";
-  if (!org || !project || !env || !component) return null;
-  return { org, project, env, component };
 }
 
 function unwrapOutputValue(raw: unknown): unknown {
@@ -142,6 +187,9 @@ function resolveDbConfig(outputs: Map<string, unknown>): DbConfig | null {
         username: parsed.username,
         password: parsed.password,
         database: parsed.database || "postgres",
+        ssl:
+          parsed.host.includes(".rds.amazonaws.com") ||
+          parsed.host.includes(".postgres.database.azure.com"),
       };
     }
   }
@@ -172,7 +220,42 @@ function resolveDbConfig(outputs: Map<string, unknown>): DbConfig | null {
     username,
     password,
     database,
+    ssl: resolvedHost.includes(".rds.amazonaws.com") || resolvedHost.includes(".postgres.database.azure.com"),
   };
+}
+
+function testDbReachability(db: DbConfig): Promise<void> {
+  const port = Number(db.port);
+  return new Promise((resolve, reject) => {
+    const socket = createConnection({ host: db.host, port, timeout: 5000 }, () => {
+      socket.end();
+      resolve();
+    });
+    socket.on("error", reject);
+    socket.on("timeout", () => {
+      socket.destroy();
+      reject(new Error(`timed out after 5s connecting to ${db.host}:${db.port}`));
+    });
+  });
+}
+
+function dbReachabilityHint(db: DbConfig, err: Error): string {
+  return [
+    `Could not open a TCP connection to PostgreSQL at ${db.host}:${db.port}.`,
+    "",
+    `Details: ${err.message}`,
+    "",
+    "The Adminer UI runs inside the Cycloid plugin container. That container must",
+    "be able to reach the database host on port 5432 (same as from a bastion or VPN).",
+    "",
+    "Common causes:",
+    "  - RDS / Azure / Cloud SQL is in a private subnet with no route from the plugin sandbox",
+    "  - Security group / firewall allows the app but not the plugin network",
+    "  - Database is not publicly accessible and no VPC peering to the plugin runtime",
+    "",
+    "Fix: expose the DB to the plugin network, run the plugin where it can reach the DB,",
+    "or use a publicly reachable endpoint with the correct security rules.",
+  ].join("\n");
 }
 
 function cycloidApiError(): string {
@@ -184,7 +267,7 @@ function cycloidApiError(): string {
     "  PLUGIN_SECRET=<per-plugin-secret>  (may be empty if PLUGIN_TOKEN_SECRET is unset)",
     "",
     "Workaround: reinstall the plugin with install-form fields:",
-    "  cy_api_url  — e.g. https://http-api.cycloid.io",
+    "  cy_api_url  — e.g. https://api.us.cycloid.io (US) or https://http-api.cycloid.io (EU)",
     "  cy_api_key  — org API key with inventory output read access",
     "",
     "Platform admin: ensure Plugin Manager has HOST_API_BASE_URL and CY_TOKEN_SECRET configured,",
@@ -318,10 +401,16 @@ function renderAdminPage(db: DbConfig, ctx: ComponentCtx): string {
     <input type="hidden" name="auth[username]" value="${escapeHtml(db.username)}" />
     <input type="hidden" name="auth[password]" value="${escapeHtml(db.password)}" />
     <input type="hidden" name="auth[db]" value="${escapeHtml(db.database)}" />
+    ${db.ssl ? '<input type="hidden" name="auth[ssl]" value="1" />' : ""}
   </form>
   <iframe name="adminer-frame" title="Database admin (${escapeHtml(ctx.component)})"></iframe>
   <script>
-    const base = window.location.pathname.replace(/\/$/, "");
+    const base = (() => {
+      const path = window.location.pathname;
+      const idx = path.indexOf("/iframe");
+      if (idx >= 0) return path.slice(0, idx + "/iframe".length).replace(/\\/$/, "");
+      return path.replace(/\\/$/, "");
+    })();
     document.getElementById("adminer-login").action = base + "/adminer/";
     document.getElementById("adminer-login").submit();
   </script>
@@ -361,15 +450,20 @@ function proxyAdminer(req: IncomingMessage, res: ServerResponse, pathname: strin
   req.pipe(upstream);
 }
 
-async function renderMainPage(url: URL, res: ServerResponse): Promise<void> {
-  const ctx = parseComponentCtx(url);
+async function renderMainPage(
+  url: URL,
+  req: IncomingMessage,
+  rawPathname: string,
+  res: ServerResponse,
+): Promise<void> {
+  const ctx = parseComponentCtx(url, req, rawPathname);
   if (!ctx) {
     send(
       res,
       400,
       renderErrorPage(
         "Missing component context",
-        "Expected org, project, env, and component query parameters from the Cycloid iframe URL.",
+        "Could not determine org, project, environment, and component from the iframe URL, query string, or Referer header.",
       ),
       "text/html; charset=utf-8",
     );
@@ -394,6 +488,18 @@ async function renderMainPage(url: URL, res: ServerResponse): Promise<void> {
       return;
     }
 
+    try {
+      await testDbReachability(db);
+    } catch (err) {
+      send(
+        res,
+        502,
+        renderErrorPage("Cannot reach database host", dbReachabilityHint(db, err as Error), ctx),
+        "text/html; charset=utf-8",
+      );
+      return;
+    }
+
     send(res, 200, renderAdminPage(db, ctx), "text/html; charset=utf-8");
   } catch (err) {
     send(
@@ -409,7 +515,8 @@ const server = createServer((req, res) => {
   const start = Date.now();
   const method = req.method ?? "GET";
   const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
-  const pathname = stripIframePrefix(url.pathname);
+  const rawPathname = url.pathname;
+  const pathname = normalizePluginPath(rawPathname);
 
   res.on("finish", () => {
     const ms = Date.now() - start;
@@ -427,7 +534,7 @@ const server = createServer((req, res) => {
   }
 
   if (method === "GET" && (pathname === "/" || pathname === "/index.html")) {
-    renderMainPage(url, res).catch((err) => {
+    renderMainPage(url, req, rawPathname, res).catch((err) => {
       send(res, 500, renderErrorPage("Internal error", (err as Error).message), "text/html; charset=utf-8");
     });
     return;
