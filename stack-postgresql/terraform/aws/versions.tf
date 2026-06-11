@@ -4,7 +4,7 @@ terraform {
   required_providers {
     cycloid = {
       source = "cycloidio/cycloid"
-      version = ">= 0.0.21"
+      version = ">= 0.7.3"
     }
     aws = {
       source  = "hashicorp/aws"
