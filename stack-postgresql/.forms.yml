@@ -126,8 +126,8 @@ use_cases:
         key: postgresql_version
         widget: dropdown
         type: string
-        default: "17"
-        values: ["18","17","16","15","14","13","12","11"]
+        default: "15"
+        values: ["15","14","13","12","11"]
         required: true
       - name: "SKU Name"
         description: "SKU name for the PostgreSQL Flexible Server."
