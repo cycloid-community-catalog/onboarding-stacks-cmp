@@ -91,6 +91,12 @@ groups:
   jobs:
     - deploy
 
+- name: actions
+  jobs:
+    - snapshot
+    - full-backup
+    - restore
+
 - name: destroy
   jobs:
     - destroy
@@ -133,6 +139,63 @@ jobs:
       - put: tfstate
         params:
           terraform_source: merged-stack/
+
+
+  - name: snapshot
+    max_in_flight: 1
+    build_logs_to_retain: 10
+    plan:
+      - task: snapshot
+        config:
+          platform: linux
+          image_resource:
+            type: registry-image
+            source:
+              repository: cycloid/cycloid-toolkit
+          run:
+            path: /bin/bash
+            args:
+              - '-ec'
+              - |
+                echo "Snapshotting database... Done"
+
+
+  - name: full-backup
+    max_in_flight: 1
+    build_logs_to_retain: 10
+    plan:
+      - task: full-backup
+        config:
+          platform: linux
+          image_resource:
+            type: registry-image
+            source:
+              repository: cycloid/cycloid-toolkit
+          run:
+            path: /bin/bash
+            args:
+              - '-ec'
+              - |
+                echo "Running full backup... Done"
+
+
+  - name: restore
+    max_in_flight: 1
+    build_logs_to_retain: 10
+    plan:
+      - task: restore
+        config:
+          platform: linux
+          image_resource:
+            type: registry-image
+            source:
+              repository: cycloid/cycloid-toolkit
+          run:
+            path: /bin/bash
+            args:
+              - '-ec'
+              - |
+                echo "Restoring database from backup... Done"
 
 
   - name: destroy
