@@ -8,8 +8,16 @@ resource "azurerm_postgresql_flexible_server" "postgresql" {
   storage_mb             = var.storage_mb
   sku_name               = var.sku_name
 
-  backup_retention_days = var.backup_retention_days
+  backup_retention_days        = var.backup_retention_days
   geo_redundant_backup_enabled = var.geo_redundant_backup_enabled
+
+  zone = var.zone
+
+  lifecycle {
+    # Azure assigns zone on create; it cannot be cleared or changed later unless
+    # exchanging HA standby zones. Ignore drift to avoid failed in-place updates.
+    ignore_changes = [zone]
+  }
 }
 
 resource "azurerm_postgresql_flexible_server_database" "database" {

@@ -45,6 +45,12 @@ variable "geo_redundant_backup_enabled" {
   default     = false
 }
 
+variable "zone" {
+  description = "Optional availability zone for new servers. Leave null to let Azure choose. Ignored after create."
+  type        = string
+  default     = null
+}
+
 variable "database_name" {
   description = "Name of the database to create"
   type        = string
