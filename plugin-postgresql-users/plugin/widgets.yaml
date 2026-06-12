@@ -6,4 +6,4 @@
     config:
       tab_name: PostgreSQL Users
   widget:
-    query: "/ui/users?org=($ .org $)&project=($ .project $)&env=($ .env $)&component=($ .component $)"
+    query: "/?org=($ .org $)&project=($ .project $)&env=($ .env $)&component=($ .component $)"

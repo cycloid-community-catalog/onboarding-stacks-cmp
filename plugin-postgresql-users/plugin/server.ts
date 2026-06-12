@@ -685,7 +685,10 @@ const server = createServer((req, res) => {
     return;
   }
 
-  if (method === "GET" && pathname === "/ui/users") {
+  if (
+    method === "GET" &&
+    (pathname === "/" || pathname === "/index.html" || pathname === "/ui/users")
+  ) {
     handleUsersPage(url, req, rawPathname, res).catch((err) => {
       send(
         res,
