@@ -9,12 +9,46 @@ if (!Number.isFinite(port) || port <= 0) {
   process.exit(1);
 }
 
+function normalizeApiBase(raw: string): string {
+  const trimmed = raw.trim().replace(/\/$/, "");
+  if (!trimmed || trimmed === "<no value>") return "";
+  if (/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(trimmed)) return trimmed;
+  return `https://${trimmed}`;
+}
+
+function normalizeProxyBase(raw: string): string {
+  const trimmed = raw.trim().replace(/\/$/, "");
+  if (!trimmed || trimmed === "<no value>") return "";
+  if (/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(trimmed)) return trimmed;
+  return `http://${trimmed}`;
+}
+
+function apiUrl(path: string, base: string, label: string): URL {
+  try {
+    return new URL(path, base);
+  } catch (err) {
+    throw new Error(
+      `Invalid ${label} "${base}": ${(err as Error).message}. Use a full URL such as https://api.us.cycloid.io or leave cy_api_url empty when PROXY_URL is injected.`,
+    );
+  }
+}
+
+function parseRequestUrl(req: IncomingMessage): URL {
+  const host = req.headers.host?.trim() || "localhost";
+  const base = host.includes("://") ? host : `http://${host}`;
+  try {
+    return new URL(req.url ?? "/", base);
+  } catch {
+    return new URL("/", base);
+  }
+}
+
 const DB_PORT = process.env.DB_PORT?.trim() || "5432";
 const ADMINER_PORT = process.env.ADMINER_PORT?.trim() || "8081";
 const ADMINER_ORIGIN = `http://127.0.0.1:${ADMINER_PORT}`;
-const PROXY_URL = process.env.PROXY_URL?.trim().replace(/\/$/, "") ?? "";
+const PROXY_URL = normalizeProxyBase(process.env.PROXY_URL ?? "");
 const PLUGIN_SECRET = process.env.PLUGIN_SECRET?.trim() ?? "";
-const CY_API_URL = process.env.CY_API_URL?.trim().replace(/\/$/, "") ?? "";
+const CY_API_URL = normalizeApiBase(process.env.CY_API_URL ?? "");
 const CY_API_KEY = process.env.CY_API_KEY?.trim() ?? "";
 
 function apiModeLabel(): string {
@@ -307,17 +341,31 @@ function httpGet(
 }
 
 async function cycloidGet(path: string): Promise<{ status: number; body: string }> {
+  const failures: string[] = [];
+
   if (PROXY_URL) {
-    const url = new URL(path, PROXY_URL);
-    if (PLUGIN_SECRET) {
-      url.searchParams.set("secret", PLUGIN_SECRET);
+    try {
+      const url = apiUrl(path, PROXY_URL, "PROXY_URL");
+      if (PLUGIN_SECRET) {
+        url.searchParams.set("secret", PLUGIN_SECRET);
+      }
+      return await httpGet(url, {});
+    } catch (err) {
+      failures.push((err as Error).message);
     }
-    return httpGet(url, {});
   }
 
   if (CY_API_URL && CY_API_KEY) {
-    const url = new URL(path, CY_API_URL);
-    return httpGet(url, { authorization: `Bearer ${CY_API_KEY}` });
+    try {
+      const url = apiUrl(path, CY_API_URL, "cy_api_url");
+      return await httpGet(url, { authorization: `Bearer ${CY_API_KEY}` });
+    } catch (err) {
+      failures.push((err as Error).message);
+    }
+  }
+
+  if (failures.length > 0) {
+    throw new Error(failures.join(" "));
   }
 
   throw new Error(cycloidApiError());
@@ -514,7 +562,7 @@ async function renderMainPage(
 const server = createServer((req, res) => {
   const start = Date.now();
   const method = req.method ?? "GET";
-  const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
+  const url = parseRequestUrl(req);
   const rawPathname = url.pathname;
   const pathname = normalizePluginPath(rawPathname);
 
