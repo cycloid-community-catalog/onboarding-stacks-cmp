@@ -1,5 +1,9 @@
-description: "List PostgreSQL database users in a Cycloid table and manage them from a component tab."
+description: "Read-only Cycloid table listing PostgreSQL database users for stack-postgresql components."
 icon: "https://cycloid-demo-stacks-logo.s3.eu-west-1.amazonaws.com/postgresql.svg"
+
+scope:
+  - organization:project:*
+  - organization:inventory-output:*
 
 configuration:
   - name: "Database port"

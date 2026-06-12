@@ -52,13 +52,3 @@
       - value: synced_at
         title: Last synced
         type: string
-
-# Add/remove users: Cycloid table widgets are read-only SQL views, so mutations
-# are exposed through a companion iframe tab (same pattern as cy-go-plugin).
-- type: iframe
-  placement:
-    type: component
-    config:
-      tab_name: Manage Users
-  widget:
-    query: "/ui/manage?org=($ .org $)&project=($ .project $)&env=($ .env $)&component=($ .component $)"

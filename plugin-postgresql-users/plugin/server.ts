@@ -23,14 +23,6 @@ const CY_API_KEY = process.env.CY_API_KEY?.trim() ?? "";
 const PLUGIN_DIR = dirname(fileURLToPath(import.meta.url));
 const SCHEMA_SQL = readFileSync(join(PLUGIN_DIR, "schema.sql"), "utf8");
 
-const APP_ROLES = {
-  readonly: "cycloid_app_readonly",
-  readwrite: "cycloid_app_readwrite",
-  admin: "cycloid_app_admin",
-} as const;
-
-type AppRole = keyof typeof APP_ROLES;
-
 const SYSTEM_USERS = new Set([
   "postgres",
   "rdsadmin",
@@ -89,79 +81,10 @@ console.log(
   }`,
 );
 
-function send(
-  res: ServerResponse,
-  status: number,
-  body: string | object,
-  contentType = "application/json",
-): void {
+function send(res: ServerResponse, status: number, body: string | object): void {
   const payload = typeof body === "string" ? body : JSON.stringify(body);
-  res.writeHead(status, { "content-type": contentType });
+  res.writeHead(status, { "content-type": "application/json" });
   res.end(payload);
-}
-
-function escapeHtml(s: string): string {
-  return s
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;");
-}
-
-function normalizePluginPath(pathname: string): string {
-  const iframeIdx = pathname.indexOf("/iframe");
-  if (iframeIdx >= 0) {
-    const rest = pathname.slice(iframeIdx + "/iframe".length);
-    if (!rest || rest === "/") return "/";
-    return rest.startsWith("/") ? rest : `/${rest}`;
-  }
-  return pathname || "/";
-}
-
-const COMPONENT_PATH =
-  /\/organizations\/([^/]+)\/projects\/([^/]+)\/environments\/([^/]+)\/components\/([^/]+)/;
-
-function parseComponentCtxFromPath(pathname: string): ComponentCtx | null {
-  const match = COMPONENT_PATH.exec(pathname);
-  if (!match) return null;
-  return {
-    org: decodeURIComponent(match[1]),
-    project: decodeURIComponent(match[2]),
-    env: decodeURIComponent(match[3]),
-    component: decodeURIComponent(match[4]),
-  };
-}
-
-function parseComponentCtxFromSearch(url: URL): ComponentCtx | null {
-  const org = url.searchParams.get("org")?.trim() ?? "";
-  const project = url.searchParams.get("project")?.trim() ?? "";
-  const env = url.searchParams.get("env")?.trim() ?? "";
-  const component = url.searchParams.get("component")?.trim() ?? "";
-  if (!org || !project || !env || !component) return null;
-  return { org, project, env, component };
-}
-
-function parseComponentCtx(url: URL, req: IncomingMessage, rawPathname: string): ComponentCtx | null {
-  const fromQuery = parseComponentCtxFromSearch(url);
-  if (fromQuery) return fromQuery;
-
-  const fromPath = parseComponentCtxFromPath(rawPathname);
-  if (fromPath) return fromPath;
-
-  const referer = req.headers.referer ?? req.headers.referrer;
-  if (typeof referer === "string" && referer) {
-    try {
-      const ref = new URL(referer);
-      const fromRefQuery = parseComponentCtxFromSearch(ref);
-      if (fromRefQuery) return fromRefQuery;
-      const fromRefPath = parseComponentCtxFromPath(ref.pathname);
-      if (fromRefPath) return fromRefPath;
-    } catch {
-      /* ignore malformed referer */
-    }
-  }
-
-  return null;
 }
 
 async function readBody(req: IncomingMessage): Promise<string> {
@@ -387,14 +310,10 @@ async function withPgClient<T>(db: DbConfig, fn: (client: pg.Client) => Promise<
   }
 }
 
-function quoteIdent(name: string): string {
-  return `"${name.replaceAll('"', '""')}"`;
-}
-
-function appRoleFromPgRoles(roleNames: string[]): string {
-  for (const [label, pgRole] of Object.entries(APP_ROLES)) {
-    if (roleNames.includes(pgRole)) return label;
-  }
+function appRoleLabel(roleNames: string[]): string {
+  if (roleNames.includes("cycloid_app_readonly")) return "readonly";
+  if (roleNames.includes("cycloid_app_readwrite")) return "readwrite";
+  if (roleNames.includes("cycloid_app_admin")) return "admin";
   if (roleNames.length === 0) return "custom";
   return roleNames.join(", ");
 }
@@ -405,44 +324,6 @@ function isProtectedUser(username: string, masterUser: string): boolean {
   if (username.startsWith("pg_")) return true;
   if (username.startsWith("rds")) return true;
   return false;
-}
-
-async function ensureAppRoles(client: pg.Client, database: string): Promise<void> {
-  const dbIdent = quoteIdent(database);
-  await client.query(`
-    DO $$ BEGIN CREATE ROLE ${quoteIdent(APP_ROLES.readonly)} NOLOGIN; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-    DO $$ BEGIN CREATE ROLE ${quoteIdent(APP_ROLES.readwrite)} NOLOGIN; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-    DO $$ BEGIN CREATE ROLE ${quoteIdent(APP_ROLES.admin)} NOLOGIN; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-  `);
-
-  await client.query(`GRANT CONNECT ON DATABASE ${dbIdent} TO ${quoteIdent(APP_ROLES.readonly)}`);
-  await client.query(`GRANT CONNECT ON DATABASE ${dbIdent} TO ${quoteIdent(APP_ROLES.readwrite)}`);
-  await client.query(`GRANT CONNECT ON DATABASE ${dbIdent} TO ${quoteIdent(APP_ROLES.admin)}`);
-
-  for (const role of Object.values(APP_ROLES)) {
-    const roleIdent = quoteIdent(role);
-    await client.query(`GRANT USAGE ON SCHEMA public TO ${roleIdent}`);
-    await client.query(`GRANT SELECT ON ALL TABLES IN SCHEMA public TO ${roleIdent}`);
-    await client.query(
-      `ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO ${roleIdent}`,
-    );
-  }
-
-  const rw = quoteIdent(APP_ROLES.readwrite);
-  await client.query(`GRANT INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO ${rw}`);
-  await client.query(
-    `ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT INSERT, UPDATE, DELETE ON TABLES TO ${rw}`,
-  );
-
-  const admin = quoteIdent(APP_ROLES.admin);
-  await client.query(`GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO ${admin}`);
-  await client.query(`GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO ${admin}`);
-  await client.query(
-    `ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL PRIVILEGES ON TABLES TO ${admin}`,
-  );
-  await client.query(
-    `ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL PRIVILEGES ON SEQUENCES TO ${admin}`,
-  );
 }
 
 async function listPostgresUsers(client: pg.Client, masterUser: string): Promise<PgUserRow[]> {
@@ -473,7 +354,7 @@ async function listPostgresUsers(client: pg.Client, masterUser: string): Promise
       const memberRoles = row.member_roles ?? [];
       return {
         username: row.username,
-        appRole: appRoleFromPgRoles(memberRoles),
+        appRole: appRoleLabel(memberRoles),
         roles: memberRoles.length ? memberRoles.join(", ") : "(none)",
         isSuperuser: row.is_superuser,
         canCreateDb: row.can_create_db,
@@ -528,10 +409,7 @@ function storeUsers(componentId: number, users: PgUserRow[]): void {
 
 async function syncComponentUsers(ctx: ComponentCtx): Promise<{ count: number; syncedAt: string }> {
   const db = await resolveDbForComponent(ctx);
-  const users = await withPgClient(db, async (client) => {
-    await ensureAppRoles(client, db.database);
-    return listPostgresUsers(client, db.username);
-  });
+  const users = await withPgClient(db, (client) => listPostgresUsers(client, db.username));
 
   const componentId = upsertComponentId(ctx);
   storeUsers(componentId, users);
@@ -556,395 +434,12 @@ function clearPluginData(): void {
   sqlite.exec(`DELETE FROM pg_users; DELETE FROM components;`);
 }
 
-function validateUsername(username: string): void {
-  if (!/^[a-zA-Z_][a-zA-Z0-9_]{0,62}$/.test(username)) {
-    throw new Error(
-      "Username must start with a letter or underscore and contain only letters, digits, or underscores (max 63 chars).",
-    );
-  }
-}
-
-function validatePassword(password: string): void {
-  if (password.length < 8) {
-    throw new Error("Password must be at least 8 characters.");
-  }
-}
-
-function parseAppRole(role: string): AppRole {
-  if (role === "readonly" || role === "readwrite" || role === "admin") return role;
-  throw new Error(`Invalid role "${role}". Expected readonly, readwrite, or admin.`);
-}
-
-async function createDatabaseUser(
-  ctx: ComponentCtx,
-  username: string,
-  password: string,
-  role: AppRole,
-): Promise<void> {
-  validateUsername(username);
-  validatePassword(password);
-
-  const db = await resolveDbForComponent(ctx);
-  if (isProtectedUser(username, db.username)) {
-    throw new Error(`Cannot create reserved username "${username}".`);
-  }
-
-  await withPgClient(db, async (client) => {
-    await ensureAppRoles(client, db.database);
-    const exists = await client.query(`SELECT 1 FROM pg_roles WHERE rolname = $1`, [username]);
-    if (exists.rowCount && exists.rowCount > 0) {
-      throw new Error(`User "${username}" already exists.`);
-    }
-
-    const userIdent = quoteIdent(username);
-    const pgRole = APP_ROLES[role];
-    await client.query(`CREATE ROLE ${userIdent} LOGIN PASSWORD $1`, [password]);
-    await client.query(`GRANT ${quoteIdent(pgRole)} TO ${userIdent}`);
-  });
-
-  await syncComponentUsers(ctx);
-}
-
-async function deleteDatabaseUser(ctx: ComponentCtx, username: string): Promise<void> {
-  validateUsername(username);
-
-  const db = await resolveDbForComponent(ctx);
-  if (isProtectedUser(username, db.username)) {
-    throw new Error(`Cannot delete protected user "${username}".`);
-  }
-
-  await withPgClient(db, async (client) => {
-    const userIdent = quoteIdent(username);
-    const masterIdent = quoteIdent(db.username);
-    await client.query(`REASSIGN OWNED BY ${userIdent} TO ${masterIdent}`);
-    await client.query(`DROP OWNED BY ${userIdent}`);
-    await client.query(`DROP ROLE IF EXISTS ${userIdent}`);
-  });
-
-  await syncComponentUsers(ctx);
-}
-
-function listStoredUsers(ctx: ComponentCtx): PgUserRow[] {
-  const rows = sqlite
-    .prepare(`
-      SELECT u.username, u.app_role AS appRole, u.roles, u.is_superuser AS isSuperuser,
-             u.can_create_db AS canCreateDb, u.can_create_role AS canCreateRole
-      FROM pg_users u
-      JOIN components c ON c.id = u.component_id
-      WHERE c.org = ? AND c.project = ? AND c.env = ? AND c.component = ?
-      ORDER BY u.username
-    `)
-    .all(ctx.org, ctx.project, ctx.env, ctx.component) as Array<{
-      username: string;
-      appRole: string;
-      roles: string;
-      isSuperuser: number;
-      canCreateDb: number;
-      canCreateRole: number;
-    }>;
-
-  return rows.map((row) => ({
-    username: row.username,
-    appRole: row.appRole,
-    roles: row.roles,
-    isSuperuser: Boolean(row.isSuperuser),
-    canCreateDb: Boolean(row.canCreateDb),
-    canCreateRole: Boolean(row.canCreateRole),
-  }));
-}
-
-function renderManagePage(ctx: ComponentCtx, users: PgUserRow[], message = "", error = ""): string {
-  const rows =
-    users.length === 0
-      ? `<tr><td colspan="3" class="muted">No application users yet. Add one below, then refresh the PostgreSQL Users tab.</td></tr>`
-      : users
-          .map(
-            (user) => `
-      <tr>
-        <td>${escapeHtml(user.username)}</td>
-        <td>${escapeHtml(user.appRole)}</td>
-        <td>
-          <button type="button" class="danger" data-delete="${escapeHtml(user.username)}">Remove</button>
-        </td>
-      </tr>`,
-          )
-          .join("");
-
-  const alert = error
-    ? `<div class="alert error">${escapeHtml(error)}</div>`
-    : message
-      ? `<div class="alert ok">${escapeHtml(message)}</div>`
-      : "";
-
-  return `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Manage PostgreSQL users</title>
-  <style>
-    :root { color-scheme: light; font-family: system-ui, sans-serif; }
-    body { margin: 0; background: #f4f6fa; color: #1a2233; }
-    main { max-width: 960px; margin: 0 auto; padding: 1.5rem; }
-    h1 { font-size: 1.25rem; margin: 0 0 0.25rem; }
-    .muted { color: #5c677f; font-size: 0.9rem; }
-    .card { background: #fff; border: 1px solid #d8deea; border-radius: 10px; padding: 1rem; margin-top: 1rem; }
-    table { width: 100%; border-collapse: collapse; }
-    th, td { border-bottom: 1px solid #e7ebf3; padding: 0.65rem 0.5rem; text-align: left; }
-    th { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.04em; color: #5c677f; }
-    label { display: block; font-size: 0.85rem; margin-bottom: 0.25rem; }
-    input, select, button { font: inherit; }
-    input, select { width: 100%; box-sizing: border-box; padding: 0.55rem 0.65rem; border: 1px solid #c9d1e0; border-radius: 8px; }
-    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 0.75rem; }
-    .actions { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.75rem; }
-    button { border: 0; border-radius: 8px; padding: 0.55rem 0.9rem; cursor: pointer; background: #1c4fd6; color: #fff; }
-    button.secondary { background: #e7ebf3; color: #1a2233; }
-    button.danger { background: #c62828; color: #fff; padding: 0.35rem 0.7rem; }
-    .alert { padding: 0.75rem 1rem; border-radius: 8px; margin-top: 1rem; }
-    .alert.ok { background: #e8f5e9; color: #1b5e20; }
-    .alert.error { background: #ffebee; color: #b71c1c; }
-  </style>
-</head>
-<body>
-  <main>
-    <h1>Manage PostgreSQL users</h1>
-    <p class="muted">${escapeHtml(ctx.org)} / ${escapeHtml(ctx.project)} / ${escapeHtml(ctx.env)} / ${escapeHtml(ctx.component)}</p>
-    ${alert}
-
-    <section class="card">
-      <h2 style="margin:0 0 0.75rem;font-size:1rem;">Add user</h2>
-      <form id="create-form" class="grid">
-        <div>
-          <label for="username">Username</label>
-          <input id="username" name="username" required pattern="[A-Za-z_][A-Za-z0-9_]{0,62}" />
-        </div>
-        <div>
-          <label for="password">Password</label>
-          <input id="password" name="password" type="password" required minlength="8" autocomplete="new-password" />
-        </div>
-        <div>
-          <label for="role">Role</label>
-          <select id="role" name="role">
-            <option value="readonly">Read only (SELECT on public schema)</option>
-            <option value="readwrite">Read / write (SELECT, INSERT, UPDATE, DELETE)</option>
-            <option value="admin">Admin (ALL on public schema objects)</option>
-          </select>
-        </div>
-      </form>
-      <div class="actions">
-        <button type="submit" form="create-form">Add user</button>
-        <button type="button" class="secondary" id="refresh-btn">Refresh from database</button>
-      </div>
-    </section>
-
-    <section class="card">
-      <h2 style="margin:0 0 0.75rem;font-size:1rem;">Existing users</h2>
-      <table>
-        <thead>
-          <tr><th>Username</th><th>Role</th><th></th></tr>
-        </thead>
-        <tbody id="users-body">${rows}</tbody>
-      </table>
-    </section>
-  </main>
-  <script>
-    const ctx = ${JSON.stringify(ctx)};
-    const base = (() => {
-      const path = window.location.pathname;
-      const idx = path.indexOf("/iframe");
-      if (idx >= 0) return path.slice(0, idx + "/iframe".length).replace(/\\/$/, "");
-      return path.replace(/\\/$/, "");
-    })();
-
-    async function api(path, options = {}) {
-      const res = await fetch(base + path, {
-        headers: { "content-type": "application/json", ...(options.headers || {}) },
-        ...options,
-      });
-      const body = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(body.error || res.statusText);
-      return body;
-    }
-
-    function showMessage(text, isError = false) {
-      let node = document.querySelector(".alert");
-      if (!node) {
-        node = document.createElement("div");
-        node.className = "alert";
-        document.querySelector("main").insertBefore(node, document.querySelector("main").children[1]);
-      }
-      node.className = "alert " + (isError ? "error" : "ok");
-      node.textContent = text;
-    }
-
-    function renderRows(users) {
-      const tbody = document.getElementById("users-body");
-      if (!users.length) {
-        tbody.innerHTML = '<tr><td colspan="3" class="muted">No application users yet.</td></tr>';
-        return;
-      }
-      tbody.innerHTML = users.map((user) =>
-        '<tr><td>' + user.username + '</td><td>' + user.appRole + '</td><td><button type="button" class="danger" data-delete="' + user.username + '">Remove</button></td></tr>'
-      ).join("");
-      bindDeleteButtons();
-    }
-
-    function bindDeleteButtons() {
-      document.querySelectorAll("[data-delete]").forEach((btn) => {
-        btn.addEventListener("click", async () => {
-          const username = btn.getAttribute("data-delete");
-          if (!confirm('Remove PostgreSQL user "' + username + '"?')) return;
-          try {
-            await api("/api/users/" + encodeURIComponent(username), {
-              method: "DELETE",
-              body: JSON.stringify(ctx),
-            });
-            const refreshed = await api("/api/sync", { method: "POST", body: JSON.stringify(ctx) });
-            renderRows(refreshed.users);
-            showMessage('Removed user "' + username + '". Refresh the PostgreSQL Users tab to see the table update.');
-          } catch (err) {
-            showMessage(err.message, true);
-          }
-        });
-      });
-    }
-
-    document.getElementById("create-form").addEventListener("submit", async (event) => {
-      event.preventDefault();
-      const form = event.target;
-      const payload = {
-        ...ctx,
-        username: form.username.value.trim(),
-        password: form.password.value,
-        role: form.role.value,
-      };
-      try {
-        await api("/api/users", { method: "POST", body: JSON.stringify(payload) });
-        const refreshed = await api("/api/sync", { method: "POST", body: JSON.stringify(ctx) });
-        renderRows(refreshed.users);
-        form.password.value = "";
-        showMessage('Created user "' + payload.username + '" with role "' + payload.role + '".');
-      } catch (err) {
-        showMessage(err.message, true);
-      }
-    });
-
-    document.getElementById("refresh-btn").addEventListener("click", async () => {
-      try {
-        const refreshed = await api("/api/sync", { method: "POST", body: JSON.stringify(ctx) });
-        renderRows(refreshed.users);
-        showMessage("Synced " + refreshed.count + " users from PostgreSQL.");
-      } catch (err) {
-        showMessage(err.message, true);
-      }
-    });
-
-    bindDeleteButtons();
-    api("/api/sync", { method: "POST", body: JSON.stringify(ctx) })
-      .then((refreshed) => renderRows(refreshed.users))
-      .catch((err) => showMessage(err.message, true));
-  </script>
-</body>
-</html>`;
-}
-
-async function handleManagePage(
-  url: URL,
-  req: IncomingMessage,
-  rawPathname: string,
-  res: ServerResponse,
-): Promise<void> {
-  const ctx = parseComponentCtx(url, req, rawPathname);
-  if (!ctx) {
-    send(res, 400, { error: "Missing component context" });
-    return;
-  }
-
-  try {
-    await syncComponentUsers(ctx);
-    const users = listStoredUsers(ctx);
-    send(res, 200, renderManagePage(ctx, users), "text/html; charset=utf-8");
-  } catch (err) {
-    send(
-      res,
-      500,
-      renderManagePage(ctx, [], "", (err as Error).message),
-      "text/html; charset=utf-8",
-    );
-  }
-}
-
-async function handleApiSync(req: IncomingMessage, res: ServerResponse): Promise<void> {
-  try {
-    const body = JSON.parse(await readBody(req)) as ComponentCtx;
-    if (!body.org || !body.project || !body.env || !body.component) {
-      send(res, 400, { error: "Missing component context in request body" });
-      return;
-    }
-    const result = await syncComponentUsers(body);
-    send(res, 200, { ...result, users: listStoredUsers(body) });
-  } catch (err) {
-    send(res, 500, { error: (err as Error).message });
-  }
-}
-
-async function handleApiCreateUser(req: IncomingMessage, res: ServerResponse): Promise<void> {
-  try {
-    const body = JSON.parse(await readBody(req)) as ComponentCtx & {
-      username?: string;
-      password?: string;
-      role?: string;
-    };
-    if (!body.org || !body.project || !body.env || !body.component) {
-      send(res, 400, { error: "Missing component context" });
-      return;
-    }
-    if (!body.username || !body.password || !body.role) {
-      send(res, 400, { error: "username, password, and role are required" });
-      return;
-    }
-    const role = parseAppRole(body.role);
-    await createDatabaseUser(body, body.username.trim(), body.password, role);
-    send(res, 201, { ok: true, username: body.username, role });
-  } catch (err) {
-    send(res, 400, { error: (err as Error).message });
-  }
-}
-
-async function handleApiDeleteUser(
-  req: IncomingMessage,
-  res: ServerResponse,
-  username: string,
-): Promise<void> {
-  try {
-    const body = JSON.parse(await readBody(req)) as ComponentCtx;
-    if (!body.org || !body.project || !body.env || !body.component) {
-      send(res, 400, { error: "Missing component context" });
-      return;
-    }
-    await deleteDatabaseUser(body, username);
-    send(res, 200, { ok: true, username });
-  } catch (err) {
-    send(res, 400, { error: (err as Error).message });
-  }
-}
-
-async function handleResync(res: ServerResponse): Promise<void> {
-  try {
-    const result = await resyncAllComponents();
-    send(res, 200, { started: true, ...result });
-  } catch (err) {
-    send(res, 500, { started: false, error: (err as Error).message });
-  }
-}
-
 async function handleEvents(req: IncomingMessage, res: ServerResponse): Promise<void> {
   try {
     const raw = await readBody(req);
     if (raw) {
       const event = JSON.parse(raw) as {
         entity?: string;
-        action?: string;
         organization?: { canonical?: string };
         project?: { canonical?: string };
         environment?: { canonical?: string };
@@ -972,12 +467,20 @@ async function handleEvents(req: IncomingMessage, res: ServerResponse): Promise<
   }
 }
 
+async function handleResync(res: ServerResponse): Promise<void> {
+  try {
+    const result = await resyncAllComponents();
+    send(res, 200, { started: true, ...result });
+  } catch (err) {
+    send(res, 500, { started: false, error: (err as Error).message });
+  }
+}
+
 const server = createServer((req, res) => {
   const start = Date.now();
   const method = req.method ?? "GET";
   const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
-  const rawPathname = url.pathname;
-  const pathname = normalizePluginPath(rawPathname);
+  const pathname = url.pathname;
 
   res.on("finish", () => {
     const ms = Date.now() - start;
@@ -999,31 +502,6 @@ const server = createServer((req, res) => {
 
   if (method === "POST" && pathname === "/_cy/resync") {
     handleResync(res).catch((err) => send(res, 500, { error: (err as Error).message }));
-    return;
-  }
-
-  if (method === "GET" && pathname === "/ui/manage") {
-    handleManagePage(url, req, rawPathname, res).catch((err) =>
-      send(res, 500, { error: (err as Error).message }),
-    );
-    return;
-  }
-
-  if (method === "POST" && pathname === "/api/sync") {
-    handleApiSync(req, res).catch((err) => send(res, 500, { error: (err as Error).message }));
-    return;
-  }
-
-  if (method === "POST" && pathname === "/api/users") {
-    handleApiCreateUser(req, res).catch((err) => send(res, 500, { error: (err as Error).message }));
-    return;
-  }
-
-  const deleteMatch = /^\/api\/users\/([^/]+)$/.exec(pathname);
-  if (method === "DELETE" && deleteMatch) {
-    handleApiDeleteUser(req, res, decodeURIComponent(deleteMatch[1])).catch((err) =>
-      send(res, 500, { error: (err as Error).message }),
-    );
     return;
   }
 
