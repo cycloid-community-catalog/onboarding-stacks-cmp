@@ -1,7 +1,6 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
-import { createConnection } from "node:net";
 
 const port = Number(process.env.PORT);
 if (!Number.isFinite(port) || port <= 0) {
@@ -258,40 +257,6 @@ function resolveDbConfig(outputs: Map<string, unknown>): DbConfig | null {
   };
 }
 
-function testDbReachability(db: DbConfig): Promise<void> {
-  const port = Number(db.port);
-  return new Promise((resolve, reject) => {
-    const socket = createConnection({ host: db.host, port, timeout: 5000 }, () => {
-      socket.end();
-      resolve();
-    });
-    socket.on("error", reject);
-    socket.on("timeout", () => {
-      socket.destroy();
-      reject(new Error(`timed out after 5s connecting to ${db.host}:${db.port}`));
-    });
-  });
-}
-
-function dbReachabilityHint(db: DbConfig, err: Error): string {
-  return [
-    `Could not open a TCP connection to PostgreSQL at ${db.host}:${db.port}.`,
-    "",
-    `Details: ${err.message}`,
-    "",
-    "The Adminer UI runs inside the Cycloid plugin container. That container must",
-    "be able to reach the database host on port 5432 (same as from a bastion or VPN).",
-    "",
-    "Common causes:",
-    "  - RDS / Azure / Cloud SQL is in a private subnet with no route from the plugin sandbox",
-    "  - Security group / firewall allows the app but not the plugin network",
-    "  - Database is not publicly accessible and no VPC peering to the plugin runtime",
-    "",
-    "Fix: expose the DB to the plugin network, run the plugin where it can reach the DB,",
-    "or use a publicly reachable endpoint with the correct security rules.",
-  ].join("\n");
-}
-
 function cycloidApiError(): string {
   return [
     "Cannot reach the Cycloid API to read Terraform outputs.",
@@ -433,8 +398,7 @@ function renderErrorPage(title: string, message: string, ctx?: ComponentCtx): st
 </html>`;
 }
 
-function renderAdminPage(db: DbConfig, ctx: ComponentCtx): string {
-  const server = `${db.host}:${db.port}`;
+function renderAdminShell(ctx: ComponentCtx): string {
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -442,30 +406,56 @@ function renderAdminPage(db: DbConfig, ctx: ComponentCtx): string {
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Adminer</title>
   <style>
-    html, body { margin: 0; height: 100%; background: #f4f6fa; }
-    iframe { border: 0; width: 100%; height: 100%; display: block; }
+    html, body { margin: 0; height: 100%; background: #f4f6fa; font-family: system-ui, sans-serif; }
+    iframe { border: 0; width: 100%; height: 100%; display: none; }
     .hidden { display: none; }
+    #status { padding: 1.25rem; color: #5c677f; }
+    .alert { background: #ffebee; color: #b71c1c; padding: 0.75rem 1rem; border-radius: 8px; margin: 1rem; white-space: pre-wrap; }
   </style>
 </head>
 <body>
+  <div id="status">Loading database connection for ${escapeHtml(ctx.component)}…</div>
+  <div id="error" class="alert hidden"></div>
   <form id="adminer-login" class="hidden" method="post" action="adminer/" target="adminer-frame">
     <input type="hidden" name="auth[driver]" value="pgsql" />
-    <input type="hidden" name="auth[server]" value="${escapeHtml(server)}" />
-    <input type="hidden" name="auth[username]" value="${escapeHtml(db.username)}" />
-    <input type="hidden" name="auth[password]" value="${escapeHtml(db.password)}" />
-    <input type="hidden" name="auth[db]" value="${escapeHtml(db.database)}" />
-    ${db.ssl ? '<input type="hidden" name="auth[ssl]" value="1" />' : ""}
+    <input type="hidden" name="auth[server]" id="auth-server" />
+    <input type="hidden" name="auth[username]" id="auth-username" />
+    <input type="hidden" name="auth[password]" id="auth-password" />
+    <input type="hidden" name="auth[db]" id="auth-db" />
+    <input type="hidden" name="auth[ssl]" id="auth-ssl" />
   </form>
   <iframe name="adminer-frame" title="Database admin (${escapeHtml(ctx.component)})"></iframe>
   <script>
-    const base = (() => {
-      const path = window.location.pathname;
-      const idx = path.indexOf("/iframe");
-      if (idx >= 0) return path.slice(0, idx + "/iframe".length).replace(/\\/$/, "");
-      return path.replace(/\\/$/, "");
-    })();
+(async () => {
+  const base = (() => {
+    const path = window.location.pathname;
+    const idx = path.indexOf("/iframe");
+    if (idx >= 0) return path.slice(0, idx + "/iframe".length).replace(/\\/$/, "");
+    return path.replace(/\\/$/, "");
+  })();
+  const statusEl = document.getElementById("status");
+  const errorEl = document.getElementById("error");
+  const frameEl = document.querySelector('iframe[name="adminer-frame"]');
+  try {
+    const res = await fetch(base + "/api/db" + window.location.search, { headers: { accept: "application/json" } });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || ("HTTP " + res.status));
+    document.getElementById("auth-server").value = data.server;
+    document.getElementById("auth-username").value = data.username;
+    document.getElementById("auth-password").value = data.password;
+    document.getElementById("auth-db").value = data.database;
+    document.getElementById("auth-ssl").disabled = !data.ssl;
+    if (data.ssl) document.getElementById("auth-ssl").value = "1";
     document.getElementById("adminer-login").action = base + "/adminer/";
+    statusEl.classList.add("hidden");
+    frameEl.style.display = "block";
     document.getElementById("adminer-login").submit();
+  } catch (err) {
+    statusEl.classList.add("hidden");
+    errorEl.classList.remove("hidden");
+    errorEl.textContent = err.message || String(err);
+  }
+})();
   </script>
 </body>
 </html>`;
@@ -503,12 +493,47 @@ function proxyAdminer(req: IncomingMessage, res: ServerResponse, pathname: strin
   req.pipe(upstream);
 }
 
-async function renderMainPage(
+async function handleDbApi(
   url: URL,
   req: IncomingMessage,
   rawPathname: string,
   res: ServerResponse,
 ): Promise<void> {
+  const ctx = parseComponentCtx(url, req, rawPathname);
+  if (!ctx) {
+    send(res, 400, { error: "Missing component context." });
+    return;
+  }
+
+  try {
+    const outputs = await fetchComponentOutputs(ctx);
+    const db = resolveDbConfig(outputs);
+    if (!db) {
+      const keys = [...outputs.keys()].sort().join(", ") || "(none)";
+      send(res, 404, {
+        error: `No usable PostgreSQL outputs for this component. Found keys: ${keys}`,
+      });
+      return;
+    }
+
+    send(res, 200, {
+      server: `${db.host}:${db.port}`,
+      username: db.username,
+      password: db.password,
+      database: db.database,
+      ssl: db.ssl,
+    });
+  } catch (err) {
+    send(res, 500, { error: (err as Error).message });
+  }
+}
+
+function renderMainPage(
+  url: URL,
+  req: IncomingMessage,
+  rawPathname: string,
+  res: ServerResponse,
+): void {
   const ctx = parseComponentCtx(url, req, rawPathname);
   if (!ctx) {
     send(
@@ -523,45 +548,8 @@ async function renderMainPage(
     return;
   }
 
-  try {
-    const outputs = await fetchComponentOutputs(ctx);
-    const db = resolveDbConfig(outputs);
-    if (!db) {
-      const keys = [...outputs.keys()].sort().join(", ") || "(none)";
-      send(
-        res,
-        404,
-        renderErrorPage(
-          "Database credentials not found",
-          `No usable PostgreSQL outputs for this component. Found keys: ${keys}\n\nExpected outputs such as rds_address, rds_username, rds_password (AWS), postgresql_server_fqdn + connection_string (Azure), or public_ip_address + database_user + database_password (GCP).`,
-          ctx,
-        ),
-        "text/html; charset=utf-8",
-      );
-      return;
-    }
-
-    try {
-      await testDbReachability(db);
-    } catch (err) {
-      send(
-        res,
-        502,
-        renderErrorPage("Cannot reach database host", dbReachabilityHint(db, err as Error), ctx),
-        "text/html; charset=utf-8",
-      );
-      return;
-    }
-
-    send(res, 200, renderAdminPage(db, ctx), "text/html; charset=utf-8");
-  } catch (err) {
-    send(
-      res,
-      500,
-      renderErrorPage("Failed to load database connection", (err as Error).message, ctx),
-      "text/html; charset=utf-8",
-    );
-  }
+  // Respond immediately so Cycloid API → Plugin Manager iframe proxy does not time out.
+  send(res, 200, renderAdminShell(ctx), "text/html; charset=utf-8");
 }
 
 const server = createServer((req, res) => {
@@ -587,8 +575,13 @@ const server = createServer((req, res) => {
   }
 
   if (method === "GET" && (pathname === "/" || pathname === "/index.html")) {
-    renderMainPage(url, req, rawPathname, res).catch((err) => {
-      send(res, 500, renderErrorPage("Internal error", (err as Error).message), "text/html; charset=utf-8");
+    renderMainPage(url, req, rawPathname, res);
+    return;
+  }
+
+  if (method === "GET" && pathname === "/api/db") {
+    handleDbApi(url, req, rawPathname, res).catch((err) => {
+      send(res, 500, { error: (err as Error).message });
     });
     return;
   }

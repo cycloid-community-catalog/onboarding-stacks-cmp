@@ -195,27 +195,8 @@ function boolCell(value: boolean): string {
 }
 
 function renderUsersPage(ctx: ComponentCtx, users: PgUserRow[], syncedAt: string, error = ""): string {
-  const rows =
-    users.length === 0
-      ? `<tr><td colspan="7" class="muted">No application users found.</td></tr>`
-      : users
-          .map(
-            (user) => `
-      <tr>
-        <td>${escapeHtml(user.username)}</td>
-        <td>${escapeHtml(user.appRole)}</td>
-        <td>${escapeHtml(user.roles)}</td>
-        <td>${boolCell(user.isSuperuser)}</td>
-        <td>${boolCell(user.canCreateDb)}</td>
-        <td>${boolCell(user.canCreateRole)}</td>
-        <td>${escapeHtml(syncedAt)}</td>
-      </tr>`,
-          )
-          .join("");
-
-  const errorBlock = error
-    ? `<div class="alert">${escapeHtml(error)}</div>`
-    : "";
+  const rows = renderUserRows(users, syncedAt);
+  const errorBlock = error ? `<div id="alert" class="alert">${escapeHtml(error)}</div>` : `<div id="alert" class="alert" hidden></div>`;
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -230,6 +211,7 @@ function renderUsersPage(ctx: ComponentCtx, users: PgUserRow[], syncedAt: string
     h1 { font-size: 1.1rem; margin: 0 0 0.25rem; }
     .muted { color: #5c677f; font-size: 0.875rem; margin-bottom: 1rem; }
     .alert { background: #ffebee; color: #b71c1c; padding: 0.75rem 1rem; border-radius: 8px; margin-bottom: 1rem; }
+    .alert[hidden] { display: none; }
     .card { background: #fff; border: 1px solid #d8deea; border-radius: 10px; overflow: auto; }
     table { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
     th, td { border-bottom: 1px solid #e7ebf3; padding: 0.65rem 0.75rem; text-align: left; white-space: nowrap; }
@@ -255,7 +237,7 @@ function renderUsersPage(ctx: ComponentCtx, users: PgUserRow[], syncedAt: string
             <th>Last synced</th>
           </tr>
         </thead>
-        <tbody>${rows}</tbody>
+        <tbody id="users-body">${rows}</tbody>
       </table>
     </div>
   </main>
@@ -263,12 +245,88 @@ function renderUsersPage(ctx: ComponentCtx, users: PgUserRow[], syncedAt: string
 </html>`;
 }
 
-async function handleUsersPage(
+function renderUserRows(users: PgUserRow[], syncedAt: string): string {
+  if (users.length === 0) {
+    return `<tr><td colspan="7" class="muted">No application users found.</td></tr>`;
+  }
+  return users
+    .map(
+      (user) => `
+      <tr>
+        <td>${escapeHtml(user.username)}</td>
+        <td>${escapeHtml(user.appRole)}</td>
+        <td>${escapeHtml(user.roles)}</td>
+        <td>${boolCell(user.isSuperuser)}</td>
+        <td>${boolCell(user.canCreateDb)}</td>
+        <td>${boolCell(user.canCreateRole)}</td>
+        <td>${escapeHtml(syncedAt)}</td>
+      </tr>`,
+    )
+    .join("");
+}
+
+function renderUsersShell(ctx: ComponentCtx): string {
+  const page = renderUsersPage(
+    ctx,
+    [],
+    "",
+    "",
+  ).replace(
+    `<tbody id="users-body"><tr><td colspan="7" class="muted">No application users found.</td></tr></tbody>`,
+    `<tbody id="users-body"><tr><td colspan="7" class="muted">Loading users…</td></tr></tbody>`,
+  );
+
+  const script = `
+<script>
+(async () => {
+  const base = (() => {
+    const path = window.location.pathname;
+    const idx = path.indexOf("/iframe");
+    if (idx >= 0) return path.slice(0, idx + "/iframe".length).replace(/\\/$/, "");
+    return path.replace(/\\/$/, "");
+  })();
+  const alertEl = document.getElementById("alert");
+  const bodyEl = document.getElementById("users-body");
+  try {
+    const res = await fetch(base + "/api/users" + window.location.search, { headers: { accept: "application/json" } });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || ("HTTP " + res.status));
+    if (alertEl) alertEl.hidden = true;
+    const users = data.users || [];
+    const syncedAt = data.syncedAt || "";
+    if (users.length === 0) {
+      bodyEl.innerHTML = '<tr><td colspan="7" class="muted">No application users found.</td></tr>';
+      return;
+    }
+    bodyEl.innerHTML = users.map((user) => \`
+      <tr>
+        <td>\${user.username}</td>
+        <td>\${user.appRole}</td>
+        <td>\${user.roles}</td>
+        <td>\${user.isSuperuser ? "yes" : "no"}</td>
+        <td>\${user.canCreateDb ? "yes" : "no"}</td>
+        <td>\${user.canCreateRole ? "yes" : "no"}</td>
+        <td>\${syncedAt}</td>
+      </tr>\`).join("");
+  } catch (err) {
+    if (alertEl) {
+      alertEl.hidden = false;
+      alertEl.textContent = err.message || String(err);
+    }
+    bodyEl.innerHTML = '<tr><td colspan="7" class="muted">Failed to load users.</td></tr>';
+  }
+})();
+</script>`;
+
+  return page.replace("</body>", `${script}</body>`);
+}
+
+function handleUsersPage(
   url: URL,
   req: IncomingMessage,
   rawPathname: string,
   res: ServerResponse,
-): Promise<void> {
+): void {
   const ctx = parseComponentCtx(url, req, rawPathname);
   if (!ctx) {
     send(
@@ -285,16 +343,27 @@ async function handleUsersPage(
     return;
   }
 
+  // Respond immediately so Cycloid API → Plugin Manager iframe proxy does not time out.
+  send(res, 200, renderUsersShell(ctx), "text/html; charset=utf-8");
+}
+
+async function handleUsersApi(
+  url: URL,
+  req: IncomingMessage,
+  rawPathname: string,
+  res: ServerResponse,
+): Promise<void> {
+  const ctx = parseComponentCtx(url, req, rawPathname);
+  if (!ctx) {
+    send(res, 400, { error: "Missing component context." });
+    return;
+  }
+
   try {
     const { users, syncedAt } = await syncComponentUsers(ctx);
-    send(res, 200, renderUsersPage(ctx, users, syncedAt), "text/html; charset=utf-8");
+    send(res, 200, { users, syncedAt });
   } catch (err) {
-    send(
-      res,
-      500,
-      renderUsersPage(ctx, [], "", (err as Error).message),
-      "text/html; charset=utf-8",
-    );
+    send(res, 500, { error: (err as Error).message });
   }
 }
 
@@ -536,7 +605,7 @@ async function withPgClient<T>(db: DbConfig, fn: (client: pg.Client) => Promise<
     password: db.password,
     database: db.database,
     ssl: db.ssl ? { rejectUnauthorized: false } : undefined,
-    connectionTimeoutMillis: 10_000,
+    connectionTimeoutMillis: 5_000,
   });
   await client.connect();
   try {
@@ -748,18 +817,13 @@ const server = createServer((req, res) => {
     method === "GET" &&
     (pathname === "/" || pathname === "/index.html" || pathname === "/ui/users")
   ) {
-    handleUsersPage(url, req, rawPathname, res).catch((err) => {
-      send(
-        res,
-        500,
-        renderUsersPage(
-          { org: "?", project: "?", env: "?", component: "?" },
-          [],
-          "",
-          (err as Error).message,
-        ),
-        "text/html; charset=utf-8",
-      );
+    handleUsersPage(url, req, rawPathname, res);
+    return;
+  }
+
+  if (method === "GET" && pathname === "/api/users") {
+    handleUsersApi(url, req, rawPathname, res).catch((err) => {
+      send(res, 500, { error: (err as Error).message });
     });
     return;
   }
