@@ -107,10 +107,10 @@ sqlite.exec(SCHEMA_SQL);
 console.log(`[INFO] sqlite db: ${DB_FILE}`);
 console.log(
   `[INFO] cycloid api: ${
-    PROXY_URL
-      ? `proxy (${PROXY_URL})`
-      : CY_API_URL && CY_API_KEY
-        ? `direct (${CY_API_URL})`
+    CY_API_URL && CY_API_KEY
+      ? `direct (${CY_API_URL})`
+      : PROXY_URL
+        ? `proxy (${PROXY_URL}) — set cy_api_key to avoid iframe deadlocks`
         : "not configured"
   }`,
 );
@@ -407,9 +407,13 @@ function resolveDbConfig(outputs: Map<string, unknown>): DbConfig | null {
 function cycloidApiError(): string {
   return [
     "Cannot reach the Cycloid API to read Terraform outputs.",
-    "Configure PROXY_URL (Plugin Manager) or cy_api_url + cy_api_key at install time.",
+    "Set cy_api_url (e.g. https://api.us.cycloid.io) and cy_api_key at plugin install time.",
+    "Direct API access is required for iframe widgets: calling PROXY_URL while handling",
+    "an iframe request can deadlock the Plugin Manager (API → PM → plugin → PM → API).",
   ].join("\n");
 }
+
+const CY_HTTP_TIMEOUT_MS = 15_000;
 
 function httpGet(
   target: URL,
@@ -425,6 +429,7 @@ function httpGet(
         path: `${target.pathname}${target.search}`,
         method: "GET",
         headers: { accept: "application/json", ...headers },
+        timeout: CY_HTTP_TIMEOUT_MS,
       },
       (res) => {
         const chunks: Buffer[] = [];
@@ -437,6 +442,10 @@ function httpGet(
         });
       },
     );
+    req.on("timeout", () => {
+      req.destroy();
+      reject(new Error(`HTTP timeout after ${CY_HTTP_TIMEOUT_MS}ms calling ${target.origin}`));
+    });
     req.on("error", reject);
     req.end();
   });
@@ -445,6 +454,17 @@ function httpGet(
 async function cycloidGet(path: string): Promise<{ status: number; body: string }> {
   const failures: string[] = [];
 
+  // Prefer direct API: iframe requests already go through Plugin Manager
+  // (API → PM → plugin). Calling PROXY_URL from the plugin re-enters PM and can deadlock.
+  if (CY_API_URL && CY_API_KEY) {
+    try {
+      const url = apiUrl(path, CY_API_URL, "cy_api_url");
+      return await httpGet(url, { authorization: `Bearer ${CY_API_KEY}` });
+    } catch (err) {
+      failures.push((err as Error).message);
+    }
+  }
+
   if (PROXY_URL) {
     try {
       const url = apiUrl(path, PROXY_URL, "PROXY_URL");
@@ -452,15 +472,6 @@ async function cycloidGet(path: string): Promise<{ status: number; body: string 
         url.searchParams.set("secret", PLUGIN_SECRET);
       }
       return await httpGet(url, {});
-    } catch (err) {
-      failures.push((err as Error).message);
-    }
-  }
-
-  if (CY_API_URL && CY_API_KEY) {
-    try {
-      const url = apiUrl(path, CY_API_URL, "cy_api_url");
-      return await httpGet(url, { authorization: `Bearer ${CY_API_KEY}` });
     } catch (err) {
       failures.push((err as Error).message);
     }

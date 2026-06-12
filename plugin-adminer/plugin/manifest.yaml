@@ -10,17 +10,17 @@ configuration:
     default: "5432"
     required: true
 
-  - name: "Cycloid API URL (fallback)"
-    description: "Only used when PROXY_URL is not injected by the Plugin Manager. Leave default on normal installs."
+  - name: "Cycloid API URL"
+    description: "Cycloid API base URL. Required for iframe widgets (e.g. https://api.us.cycloid.io)."
     key: cy_api_url
     widget: simple_text
     type: string
     default: "https://api.us.cycloid.io"
-    required: false
+    required: true
 
-  - name: "Cycloid API key (fallback)"
-    description: "Org API key with permission to list inventory outputs. Required only if the Plugin Manager proxy env vars are missing."
+  - name: "Cycloid API key"
+    description: "Org API key with inventory output read access. Required for iframe widgets to avoid Plugin Manager deadlocks."
     key: cy_api_key
     widget: simple_text
     type: string
-    required: false
+    required: true

@@ -52,11 +52,11 @@ const CY_API_URL = normalizeApiBase(process.env.CY_API_URL ?? "");
 const CY_API_KEY = process.env.CY_API_KEY?.trim() ?? "";
 
 function apiModeLabel(): string {
-  if (PROXY_URL) {
-    return `proxy (${PROXY_URL}, secret=${PLUGIN_SECRET ? "set" : "empty"})`;
-  }
   if (CY_API_URL && CY_API_KEY) {
     return `direct (${CY_API_URL})`;
+  }
+  if (PROXY_URL) {
+    return `proxy (${PROXY_URL}, secret=${PLUGIN_SECRET ? "set" : "empty"}) — set cy_api_key to avoid iframe deadlocks`;
   }
   return "not configured";
 }
@@ -296,18 +296,16 @@ function cycloidApiError(): string {
   return [
     "Cannot reach the Cycloid API to read Terraform outputs.",
     "",
-    "Expected (injected by Plugin Manager at install time):",
-    "  PROXY_URL=<plugin-manager-proxy>",
-    "  PLUGIN_SECRET=<per-plugin-secret>  (may be empty if PLUGIN_TOKEN_SECRET is unset)",
-    "",
-    "Workaround: reinstall the plugin with install-form fields:",
+    "Set at plugin install time:",
     "  cy_api_url  — e.g. https://api.us.cycloid.io (US) or https://http-api.cycloid.io (EU)",
     "  cy_api_key  — org API key with inventory output read access",
     "",
-    "Platform admin: ensure Plugin Manager has HOST_API_BASE_URL and CY_TOKEN_SECRET configured,",
-    "then restart Plugin Manager and reinstall this plugin.",
+    "Direct API access is required for iframe widgets: calling PROXY_URL while handling",
+    "an iframe request can deadlock the Plugin Manager (API → PM → plugin → PM → API).",
   ].join("\n");
 }
+
+const CY_HTTP_TIMEOUT_MS = 15_000;
 
 function httpGet(
   target: URL,
@@ -323,6 +321,7 @@ function httpGet(
         path: `${target.pathname}${target.search}`,
         method: "GET",
         headers: { accept: "application/json", ...headers },
+        timeout: CY_HTTP_TIMEOUT_MS,
       },
       (res) => {
         const chunks: Buffer[] = [];
@@ -335,6 +334,10 @@ function httpGet(
         });
       },
     );
+    req.on("timeout", () => {
+      req.destroy();
+      reject(new Error(`HTTP timeout after ${CY_HTTP_TIMEOUT_MS}ms calling ${target.origin}`));
+    });
     req.on("error", reject);
     req.end();
   });
@@ -343,6 +346,17 @@ function httpGet(
 async function cycloidGet(path: string): Promise<{ status: number; body: string }> {
   const failures: string[] = [];
 
+  // Prefer direct API: iframe requests already go through Plugin Manager
+  // (API → PM → plugin). Calling PROXY_URL from the plugin re-enters PM and can deadlock.
+  if (CY_API_URL && CY_API_KEY) {
+    try {
+      const url = apiUrl(path, CY_API_URL, "cy_api_url");
+      return await httpGet(url, { authorization: `Bearer ${CY_API_KEY}` });
+    } catch (err) {
+      failures.push((err as Error).message);
+    }
+  }
+
   if (PROXY_URL) {
     try {
       const url = apiUrl(path, PROXY_URL, "PROXY_URL");
@@ -350,15 +364,6 @@ async function cycloidGet(path: string): Promise<{ status: number; body: string 
         url.searchParams.set("secret", PLUGIN_SECRET);
       }
       return await httpGet(url, {});
-    } catch (err) {
-      failures.push((err as Error).message);
-    }
-  }
-
-  if (CY_API_URL && CY_API_KEY) {
-    try {
-      const url = apiUrl(path, CY_API_URL, "cy_api_url");
-      return await httpGet(url, { authorization: `Bearer ${CY_API_KEY}` });
     } catch (err) {
       failures.push((err as Error).message);
     }
