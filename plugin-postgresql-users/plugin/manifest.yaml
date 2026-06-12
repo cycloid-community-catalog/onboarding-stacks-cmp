@@ -1,4 +1,4 @@
-description: "Read-only Cycloid table listing PostgreSQL database users for stack-postgresql components."
+description: "Read-only iframe table listing PostgreSQL database users for stack-postgresql components."
 icon: "https://cycloid-demo-stacks-logo.s3.eu-west-1.amazonaws.com/postgresql.svg"
 
 scope:

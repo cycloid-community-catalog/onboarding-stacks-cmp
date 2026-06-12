@@ -1,18 +1,14 @@
 # PostgreSQL Users Cycloid Plugin
 
-Read-only Cycloid plugin for **stack-postgresql** components. It lists PostgreSQL login roles in a native **table** widget on the component tab.
+Read-only Cycloid plugin for **stack-postgresql** components. It lists PostgreSQL login roles in a **read-only table** on the component tab.
 
-Based on the [cy-go-plugin](https://github.com/cycloidio/cy-go-plugin) / [sentry-plugin](https://github.com/cycloidio/sentry-plugin) pattern:
-
-- `schema.sql` — SQLite cache read directly by Cycloid for the table widget
-- `widgets.yaml` — declares a single read-only `table` widget
-- `/_cy/resync` and `/_cy/events` — refresh cached users from PostgreSQL
+> **Note:** Native Cycloid `table` widgets are not supported on all platform versions (including SaaS v6.10). This plugin uses an **iframe** that renders a read-only HTML table — the same approach as [plugin-adminer](https://github.com/cycloid-community-catalog/onboarding-stacks-cmp/tree/master/plugin-adminer).
 
 ## Widget
 
 | Tab | Type | Purpose |
 |-----|------|---------|
-| **PostgreSQL Users** | `table` | Read-only list of database login roles |
+| **PostgreSQL Users** | `iframe` | Read-only HTML table of database login roles |
 
 System and stack admin accounts (`postgres`, `rdsadmin`, the Terraform master user, …) are excluded from the list.
 

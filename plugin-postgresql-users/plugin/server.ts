@@ -81,10 +81,187 @@ console.log(
   }`,
 );
 
-function send(res: ServerResponse, status: number, body: string | object): void {
+function send(
+  res: ServerResponse,
+  status: number,
+  body: string | object,
+  contentType = "application/json",
+): void {
   const payload = typeof body === "string" ? body : JSON.stringify(body);
-  res.writeHead(status, { "content-type": "application/json" });
+  res.writeHead(status, { "content-type": contentType });
   res.end(payload);
+}
+
+function escapeHtml(s: string): string {
+  return s
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;");
+}
+
+function normalizePluginPath(pathname: string): string {
+  const iframeIdx = pathname.indexOf("/iframe");
+  if (iframeIdx >= 0) {
+    const rest = pathname.slice(iframeIdx + "/iframe".length);
+    if (!rest || rest === "/") return "/";
+    return rest.startsWith("/") ? rest : `/${rest}`;
+  }
+  return pathname || "/";
+}
+
+const COMPONENT_PATH =
+  /\/organizations\/([^/]+)\/projects\/([^/]+)\/environments\/([^/]+)\/components\/([^/]+)/;
+
+function parseComponentCtxFromPath(pathname: string): ComponentCtx | null {
+  const match = COMPONENT_PATH.exec(pathname);
+  if (!match) return null;
+  return {
+    org: decodeURIComponent(match[1]),
+    project: decodeURIComponent(match[2]),
+    env: decodeURIComponent(match[3]),
+    component: decodeURIComponent(match[4]),
+  };
+}
+
+function parseComponentCtxFromSearch(url: URL): ComponentCtx | null {
+  const org = url.searchParams.get("org")?.trim() ?? "";
+  const project = url.searchParams.get("project")?.trim() ?? "";
+  const env = url.searchParams.get("env")?.trim() ?? "";
+  const component = url.searchParams.get("component")?.trim() ?? "";
+  if (!org || !project || !env || !component) return null;
+  return { org, project, env, component };
+}
+
+function parseComponentCtx(url: URL, req: IncomingMessage, rawPathname: string): ComponentCtx | null {
+  const fromQuery = parseComponentCtxFromSearch(url);
+  if (fromQuery) return fromQuery;
+
+  const fromPath = parseComponentCtxFromPath(rawPathname);
+  if (fromPath) return fromPath;
+
+  const referer = req.headers.referer ?? req.headers.referrer;
+  if (typeof referer === "string" && referer) {
+    try {
+      const ref = new URL(referer);
+      const fromRefQuery = parseComponentCtxFromSearch(ref);
+      if (fromRefQuery) return fromRefQuery;
+      const fromRefPath = parseComponentCtxFromPath(ref.pathname);
+      if (fromRefPath) return fromRefPath;
+    } catch {
+      /* ignore malformed referer */
+    }
+  }
+
+  return null;
+}
+
+function boolCell(value: boolean): string {
+  return value ? "yes" : "no";
+}
+
+function renderUsersPage(ctx: ComponentCtx, users: PgUserRow[], syncedAt: string, error = ""): string {
+  const rows =
+    users.length === 0
+      ? `<tr><td colspan="7" class="muted">No application users found.</td></tr>`
+      : users
+          .map(
+            (user) => `
+      <tr>
+        <td>${escapeHtml(user.username)}</td>
+        <td>${escapeHtml(user.appRole)}</td>
+        <td>${escapeHtml(user.roles)}</td>
+        <td>${boolCell(user.isSuperuser)}</td>
+        <td>${boolCell(user.canCreateDb)}</td>
+        <td>${boolCell(user.canCreateRole)}</td>
+        <td>${escapeHtml(syncedAt)}</td>
+      </tr>`,
+          )
+          .join("");
+
+  const errorBlock = error
+    ? `<div class="alert">${escapeHtml(error)}</div>`
+    : "";
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>PostgreSQL users</title>
+  <style>
+    :root { color-scheme: light; font-family: system-ui, sans-serif; }
+    body { margin: 0; background: #f4f6fa; color: #1a2233; }
+    main { padding: 1rem 1.25rem 1.5rem; }
+    h1 { font-size: 1.1rem; margin: 0 0 0.25rem; }
+    .muted { color: #5c677f; font-size: 0.875rem; margin-bottom: 1rem; }
+    .alert { background: #ffebee; color: #b71c1c; padding: 0.75rem 1rem; border-radius: 8px; margin-bottom: 1rem; }
+    .card { background: #fff; border: 1px solid #d8deea; border-radius: 10px; overflow: auto; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
+    th, td { border-bottom: 1px solid #e7ebf3; padding: 0.65rem 0.75rem; text-align: left; white-space: nowrap; }
+    th { background: #f8f9fc; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.04em; color: #5c677f; position: sticky; top: 0; }
+    tr:last-child td { border-bottom: 0; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>PostgreSQL users</h1>
+    <p class="muted">${escapeHtml(ctx.org)} / ${escapeHtml(ctx.project)} / ${escapeHtml(ctx.env)} / ${escapeHtml(ctx.component)}</p>
+    ${errorBlock}
+    <div class="card">
+      <table>
+        <thead>
+          <tr>
+            <th>Username</th>
+            <th>Application role</th>
+            <th>PostgreSQL roles</th>
+            <th>Superuser</th>
+            <th>Can create DB</th>
+            <th>Can create role</th>
+            <th>Last synced</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+  </main>
+</body>
+</html>`;
+}
+
+async function handleUsersPage(
+  url: URL,
+  req: IncomingMessage,
+  rawPathname: string,
+  res: ServerResponse,
+): Promise<void> {
+  const ctx = parseComponentCtx(url, req, rawPathname);
+  if (!ctx) {
+    send(
+      res,
+      400,
+      renderUsersPage(
+        { org: "?", project: "?", env: "?", component: "?" },
+        [],
+        "",
+        "Missing component context in the iframe URL.",
+      ),
+      "text/html; charset=utf-8",
+    );
+    return;
+  }
+
+  try {
+    const { users, syncedAt } = await syncComponentUsers(ctx);
+    send(res, 200, renderUsersPage(ctx, users, syncedAt), "text/html; charset=utf-8");
+  } catch (err) {
+    send(
+      res,
+      500,
+      renderUsersPage(ctx, [], "", (err as Error).message),
+      "text/html; charset=utf-8",
+    );
+  }
 }
 
 async function readBody(req: IncomingMessage): Promise<string> {
@@ -407,7 +584,9 @@ function storeUsers(componentId: number, users: PgUserRow[]): void {
   tx();
 }
 
-async function syncComponentUsers(ctx: ComponentCtx): Promise<{ count: number; syncedAt: string }> {
+async function syncComponentUsers(
+  ctx: ComponentCtx,
+): Promise<{ count: number; syncedAt: string; users: PgUserRow[] }> {
   const db = await resolveDbForComponent(ctx);
   const users = await withPgClient(db, (client) => listPostgresUsers(client, db.username));
 
@@ -417,7 +596,7 @@ async function syncComponentUsers(ctx: ComponentCtx): Promise<{ count: number; s
   console.log(
     `[INFO] synced ${users.length} users for ${ctx.org}/${ctx.project}/${ctx.env}/${ctx.component}`,
   );
-  return { count: users.length, syncedAt };
+  return { count: users.length, syncedAt, users };
 }
 
 async function resyncAllComponents(): Promise<{ components: number; users: number }> {
@@ -480,7 +659,8 @@ const server = createServer((req, res) => {
   const start = Date.now();
   const method = req.method ?? "GET";
   const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
-  const pathname = url.pathname;
+  const rawPathname = url.pathname;
+  const pathname = normalizePluginPath(rawPathname);
 
   res.on("finish", () => {
     const ms = Date.now() - start;
@@ -502,6 +682,23 @@ const server = createServer((req, res) => {
 
   if (method === "POST" && pathname === "/_cy/resync") {
     handleResync(res).catch((err) => send(res, 500, { error: (err as Error).message }));
+    return;
+  }
+
+  if (method === "GET" && pathname === "/ui/users") {
+    handleUsersPage(url, req, rawPathname, res).catch((err) => {
+      send(
+        res,
+        500,
+        renderUsersPage(
+          { org: "?", project: "?", env: "?", component: "?" },
+          [],
+          "",
+          (err as Error).message,
+        ),
+        "text/html; charset=utf-8",
+      );
+    });
     return;
   }
 
