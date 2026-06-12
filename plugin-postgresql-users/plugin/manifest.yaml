@@ -1,0 +1,26 @@
+description: "List PostgreSQL database users in a Cycloid table and manage them from a component tab."
+icon: "https://cycloid-demo-stacks-logo.s3.eu-west-1.amazonaws.com/postgresql.svg"
+
+configuration:
+  - name: "Database port"
+    description: "Default PostgreSQL port when the Terraform output does not include one."
+    key: db_port
+    widget: simple_text
+    type: string
+    default: "5432"
+    required: true
+
+  - name: "Cycloid API URL (fallback)"
+    description: "Only used when PROXY_URL is not injected by the Plugin Manager."
+    key: cy_api_url
+    widget: simple_text
+    type: string
+    default: "https://api.us.cycloid.io"
+    required: false
+
+  - name: "Cycloid API key (fallback)"
+    description: "Org API key with permission to list inventory outputs."
+    key: cy_api_key
+    widget: simple_text
+    type: string
+    required: false

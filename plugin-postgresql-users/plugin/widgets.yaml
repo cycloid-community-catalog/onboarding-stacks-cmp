@@ -1,0 +1,64 @@
+# Cycloid table widget: reads pg_users from the plugin SQLite DB (see schema.sql).
+# Relations scope rows to the current component context.
+- type: table
+  placement:
+    type: component
+    config:
+      tab_name: PostgreSQL Users
+  widget:
+    query: >
+      SELECT
+        u.username,
+        u.app_role,
+        u.roles,
+        u.is_superuser,
+        u.can_create_db,
+        u.can_create_role,
+        u.synced_at
+      FROM pg_users AS u
+      JOIN components AS c ON c.id = u.component_id
+    relations:
+      - name: Organization
+        description: Cycloid organization canonical
+        selector: c.org
+      - name: Project
+        description: Cycloid project canonical
+        selector: c.project
+      - name: Environment
+        description: Cycloid environment canonical
+        selector: c.env
+      - name: Component
+        description: Cycloid component canonical
+        selector: c.component
+    columns:
+      - value: username
+        title: Username
+        type: string
+      - value: app_role
+        title: Application role
+        type: string
+      - value: roles
+        title: PostgreSQL roles
+        type: string
+      - value: is_superuser
+        title: Superuser
+        type: boolean
+      - value: can_create_db
+        title: Can create DB
+        type: boolean
+      - value: can_create_role
+        title: Can create role
+        type: boolean
+      - value: synced_at
+        title: Last synced
+        type: string
+
+# Add/remove users: Cycloid table widgets are read-only SQL views, so mutations
+# are exposed through a companion iframe tab (same pattern as cy-go-plugin).
+- type: iframe
+  placement:
+    type: component
+    config:
+      tab_name: Manage Users
+  widget:
+    query: "/ui/manage?org=($ .org $)&project=($ .project $)&env=($ .env $)&component=($ .component $)"
