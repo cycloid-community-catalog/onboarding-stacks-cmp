@@ -4,4 +4,4 @@
     config:
       tab_name: Adminer
   widget:
-    query: "/"
+    query: "/adminer/"

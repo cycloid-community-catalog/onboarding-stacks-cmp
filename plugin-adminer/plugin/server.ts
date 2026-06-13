@@ -8,6 +8,7 @@ if (!Number.isFinite(port) || port <= 0) {
 }
 
 const ADMINER_PORT = process.env.ADMINER_PORT?.trim() || "8081";
+const ADMINER_MOUNT = "/adminer";
 
 const STRIPPED_RESPONSE_HEADERS = new Set([
   "x-frame-options",
@@ -26,8 +27,8 @@ const HOP_BY_HOP_HEADERS = new Set([
   "upgrade",
 ]);
 
-/** Runs in the iframe document; fixes URLs using window.location (server only sees "/"). */
-const IFRAME_CLIENT_SCRIPT = `<script>(function(){function ib(){var p=location.pathname,i=p.indexOf("/iframe");return i<0?null:location.origin+p.slice(0,i+"/iframe".length)+"/"}function fix(u){var b=ib();if(!b||!u)return u;if(/^https?:\\/\\//i.test(u)||u.indexOf("//")===0)return u;if(u.charAt(0)==="/")return b.replace(/\\/$/,"")+u;if(u.charAt(0)==="?")return b.replace(/\\/?$/,"/")+u;return u}var b=ib();if(b){var base=document.createElement("base");base.href=b;(document.head||document.documentElement).prepend(base);document.cookie="cy_adminer_base="+encodeURIComponent(new URL(b).pathname.replace(/\\/$/,""))+"; path=/; secure; samesite=none"}function fixAll(){document.querySelectorAll("a[href],form[action]").forEach(function(el){var a=el.hasAttribute("href")?"href":"action";var v=el.getAttribute(a);if(v&&v.charAt(0)==="/")el.setAttribute(a,fix(v))})}if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",fixAll);else fixAll();document.addEventListener("submit",function(e){var f=e.target;if(f&&f.action)f.action=fix(f.action)},true)})();</script>`;
+/** Runs in the iframe; rewrites root-relative URLs using the current document path. */
+const IFRAME_CLIENT_SCRIPT = `<script>(function(){function baseDir(){var p=location.pathname;if(p.indexOf("/iframe")<0)return null;if(!p.endsWith("/"))p=p.replace(/\\/[^\\/]+$/,"/");return location.origin+p}function fixUrl(u){var b=baseDir();if(!b||!u)return u;if(/^https?:\\/\\//i.test(u)||u.indexOf("//")===0)return u;if(u.charAt(0)==="/")return b.replace(/\\/$/,"")+u;if(u.charAt(0)==="?")return b.replace(/\\/?$/,"/")+u;return u}var b=baseDir();if(b){document.cookie="cy_adminer_base="+encodeURIComponent(new URL(b).pathname.replace(/\\/$/,""))+"; path=/; secure; samesite=none";if(!document.querySelector("base")){var base=document.createElement("base");base.href=b;(document.head||document.documentElement).prepend(base)}}function patch(){document.querySelectorAll('a[href^="/"],form[action^="/"]').forEach(function(el){var a=el.hasAttribute("href")?"href":"action";el.setAttribute(a,fixUrl(el.getAttribute(a)||""))})}patch();new MutationObserver(patch).observe(document.documentElement,{childList:true,subtree:true});document.addEventListener("submit",function(e){var f=e.target;if(!f||f.nodeName!=="FORM")return;var act=f.getAttribute("action");if(act===null||act===""||act==="/")f.action=fixUrl(act||"/")},true)})();</script>`;
 
 function parseRequestUrl(req: IncomingMessage): URL {
   const host = req.headers.host?.trim() || "localhost";
@@ -61,7 +62,19 @@ function resolvePathname(url: URL, rawPathname: string): string {
 function iframeBaseFromPathname(pathname: string): string {
   const iframeIdx = pathname.indexOf("/iframe");
   if (iframeIdx < 0) return "";
-  return pathname.slice(0, iframeIdx + "/iframe".length);
+  const prefix = pathname.slice(0, iframeIdx + "/iframe".length);
+  const afterIframe = pathname.slice(iframeIdx + "/iframe".length);
+  const mountMatch = new RegExp(`^${ADMINER_MOUNT}(?:/|$)`).exec(afterIframe);
+  if (mountMatch) return `${prefix}${ADMINER_MOUNT}`;
+  return prefix;
+}
+
+function toAdminerPath(pluginPath: string): string {
+  if (pluginPath === ADMINER_MOUNT || pluginPath === `${ADMINER_MOUNT}/`) return "/";
+  if (pluginPath.startsWith(`${ADMINER_MOUNT}/`)) {
+    return pluginPath.slice(ADMINER_MOUNT.length) || "/";
+  }
+  return pluginPath;
 }
 
 function iframeBaseFromCookie(cookieHeader: string | undefined, origin: string): { href: string; path: string } | null {
@@ -195,14 +208,24 @@ function sendJson(res: ServerResponse, status: number, body: object): void {
   res.end(JSON.stringify(body));
 }
 
+async function readRequestBody(req: IncomingMessage): Promise<Buffer | undefined> {
+  const method = req.method ?? "GET";
+  if (method === "GET" || method === "HEAD") return undefined;
+  const chunks: Buffer[] = [];
+  for await (const chunk of req) chunks.push(chunk as Buffer);
+  return Buffer.concat(chunks);
+}
+
 function proxyAdminer(
   req: IncomingMessage,
   res: ServerResponse,
   pathname: string,
   search: string,
   requestUrl: URL,
+  body: Buffer | undefined,
 ): void {
-  const targetPath = `${pathname}${search}`;
+  const adminerPath = toAdminerPath(pathname);
+  const targetPath = `${adminerPath}${search}`;
   const publicBase = getPublicBase(req, requestUrl);
 
   const headers: Record<string, string> = {};
@@ -211,6 +234,10 @@ function proxyAdminer(
     headers[key] = Array.isArray(value) ? value.join(", ") : value;
   }
   headers.host = `127.0.0.1:${ADMINER_PORT}`;
+
+  if (body !== undefined) {
+    headers["content-length"] = String(body.length);
+  }
 
   const upstream = httpRequest(
     {
@@ -249,10 +276,15 @@ function proxyAdminer(
     res.end(`Adminer unavailable: ${(err as Error).message}`);
   });
 
-  req.pipe(upstream);
+  if (body !== undefined) {
+    upstream.write(body);
+    upstream.end();
+  } else {
+    req.pipe(upstream);
+  }
 }
 
-const server = createServer((req, res) => {
+const server = createServer(async (req, res) => {
   const start = Date.now();
   const method = req.method ?? "GET";
   const url = parseRequestUrl(req);
@@ -269,7 +301,8 @@ const server = createServer((req, res) => {
   if (method === "DELETE" && pathname === "/_cy/plugin") return sendJson(res, 200, { ok: true });
   if (method === "POST" && pathname === "/_cy/resync") return sendJson(res, 200, { started: false });
 
-  proxyAdminer(req, res, pathname, url.search, url);
+  const body = await readRequestBody(req);
+  proxyAdminer(req, res, pathname, url.search, url, body);
 });
 
 server.listen(port, "0.0.0.0", () => {
