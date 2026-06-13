@@ -18,8 +18,15 @@ const adminerSessions = new Map<string, { cookieHeader: string; updatedAt: numbe
 /** Short _cy_sk token → canonical widget iframe path (avoids multi-KB query strings). */
 const shortSessionKeys = new Map<string, string>();
 
+/** Strip /adminer suffix and the per-request JWT from .../plugin_widgets/{id}/{jwt}/iframe paths. */
+function stableWidgetPath(path: string): string {
+  let p = path.replace(/\/adminer\/?$/i, "").replace(/\/+$/, "");
+  p = p.replace(/(\/plugin_widgets\/\d+)\/[^/]+(?=\/iframe)/, "$1");
+  return p;
+}
+
 function canonicalSessionKey(raw: string): string {
-  return raw.replace(/\/adminer\/?$/i, "").replace(/\/$/, "");
+  return stableWidgetPath(decodeURIComponent(raw));
 }
 
 function isCanonicalKey(key: string): boolean {
@@ -99,7 +106,7 @@ function normalizeStorageKey(
     const fromWidget = widgetKeyFromRequest(req);
     if (fromWidget) return fromWidget;
     if (publicBasePath) return canonicalSessionKey(publicBasePath);
-    return key;
+    return "";
   }
 
   if (isShortToken(key)) {
@@ -214,14 +221,12 @@ function saveAdminerSessionFromCookies(key: string, setCookies: string[]): void 
   if (key && isCanonicalKey(key)) {
     adminerSessions.set(key, entry);
     const sid = incoming.get("adminer_sid");
-    if (sid) {
-      adminerSessions.set(`sid:${sid}`, entry);
-      relinkShortTokens(key, sid);
-    }
+    if (sid) adminerSessions.set(`sid:${sid}`, entry);
+    relinkShortTokens(key, sid);
     return;
   }
 
-  if (key) adminerSessions.set(key, entry);
+  if (key && !key.startsWith("sid:")) adminerSessions.set(key, entry);
   const sid = incoming.get("adminer_sid");
   if (sid) adminerSessions.set(`sid:${sid}`, entry);
 }
