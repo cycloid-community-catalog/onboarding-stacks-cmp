@@ -1,4 +1,4 @@
-import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { createServer, type IncomingMessage, type IncomingHttpHeaders, type ServerResponse } from "node:http";
 import { request as httpRequest } from "node:http";
 
 const port = Number(process.env.PORT);
@@ -8,6 +8,44 @@ if (!Number.isFinite(port) || port <= 0) {
 }
 
 const ADMINER_PORT = process.env.ADMINER_PORT?.trim() || "8081";
+
+// Adminer sets X-Frame-Options: deny — must strip so Cycloid can embed the UI in an iframe.
+const STRIPPED_RESPONSE_HEADERS = new Set([
+  "x-frame-options",
+  "content-security-policy",
+  "content-security-policy-report-only",
+]);
+
+const HOP_BY_HOP_HEADERS = new Set([
+  "connection",
+  "keep-alive",
+  "proxy-authenticate",
+  "proxy-authorization",
+  "te",
+  "trailers",
+  "transfer-encoding",
+  "upgrade",
+]);
+
+function filterProxyResponseHeaders(headers: IncomingHttpHeaders): Record<string, string | string[]> {
+  const out: Record<string, string | string[]> = {};
+  for (const [key, value] of Object.entries(headers)) {
+    if (value === undefined) continue;
+    const lower = key.toLowerCase();
+    if (HOP_BY_HOP_HEADERS.has(lower) || STRIPPED_RESPONSE_HEADERS.has(lower)) continue;
+    if (lower === "location" && typeof value === "string" && value.includes("127.0.0.1")) {
+      try {
+        const loc = new URL(value);
+        out[key] = loc.pathname + loc.search;
+      } catch {
+        out[key] = value;
+      }
+      continue;
+    }
+    out[key] = value;
+  }
+  return out;
+}
 
 function parseRequestUrl(req: IncomingMessage): URL {
   const host = req.headers.host?.trim() || "localhost";
@@ -67,7 +105,7 @@ function proxyAdminer(
       headers,
     },
     (upstreamRes) => {
-      res.writeHead(upstreamRes.statusCode ?? 502, upstreamRes.headers);
+      res.writeHead(upstreamRes.statusCode ?? 502, filterProxyResponseHeaders(upstreamRes.headers));
       upstreamRes.pipe(res);
     },
   );
