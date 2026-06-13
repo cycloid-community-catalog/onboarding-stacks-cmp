@@ -9,7 +9,7 @@ import {
   type DbTarget,
 } from "./network-diagnostics.ts";
 
-const PLUGIN_VERSION = "2.0.8";
+const PLUGIN_VERSION = "2.0.9";
 
 const port = Number(process.env.PORT);
 if (!Number.isFinite(port) || port <= 0) {
@@ -211,8 +211,9 @@ function resolveDbConfig(): DbConfig {
     db.sslServerName = DATABASE_SSL_SERVERNAME;
   }
   if (isIpAddress(db.host) && db.ssl && !db.sslServerName) {
-    console.warn(
-      "[WARN] database_url uses an IP without database_ssl_servername — set the Azure FQDN for TLS SNI",
+    throw new Error(
+      "database_ssl_servername is required when database_url uses an IP address. " +
+        "Set it to the Azure/RDS hostname (e.g. demopostgres99.postgres.database.azure.com).",
     );
   }
   return db;
@@ -220,16 +221,24 @@ function resolveDbConfig(): DbConfig {
 
 const DB_CONNECT_TIMEOUT_MS = 15_000;
 
-function buildPgClientConfig(db: DbConfig): pg.ClientConfig {
-  const connectionString = `postgresql://${encodeURIComponent(db.username)}:${encodeURIComponent(db.password)}@${db.host}:${db.port}/${encodeURIComponent(db.database)}${db.ssl ? "?sslmode=require" : ""}`;
+function buildPgSslOptions(db: DbConfig): pg.ConnectionConfig["ssl"] {
+  if (!db.ssl) return false;
+  const servername = db.sslServerName || (isIpAddress(db.host) ? undefined : db.host);
   return {
-    connectionString,
-    ssl: db.ssl
-      ? {
-          rejectUnauthorized: false,
-          ...(db.sslServerName ? { servername: db.sslServerName } : {}),
-        }
-      : undefined,
+    rejectUnauthorized: false,
+    ...(servername ? { servername } : {}),
+    checkServerIdentity: () => undefined,
+  };
+}
+
+function buildPgClientConfig(db: DbConfig): pg.ClientConfig {
+  return {
+    host: db.host,
+    port: Number(db.port),
+    user: db.username,
+    password: db.password,
+    database: db.database,
+    ssl: buildPgSslOptions(db),
     connectionTimeoutMillis: DB_CONNECT_TIMEOUT_MS,
     query_timeout: DB_CONNECT_TIMEOUT_MS,
   };
@@ -243,12 +252,12 @@ function formatPgConnectError(db: DbConfig, err: unknown): Error {
         "Ensure public network access is enabled and the plugin container can reach the database.",
     );
   }
-  if (/no encryption|pg_hba|ssl/i.test(message)) {
+  if (/no encryption|pg_hba|ssl|altnames|certificate/i.test(message)) {
     return new Error(
       `PostgreSQL rejected the connection (${message}). ` +
         (isIpAddress(db.host)
-          ? "When using an IP (DNS workaround), set database_url with ?sslmode=require and database_ssl_servername to the Azure FQDN."
-          : "Azure requires SSL — use database_url with ?sslmode=require."),
+          ? "When using an IP (DNS workaround), set database_ssl_servername to the Azure FQDN (e.g. demopostgres99.postgres.database.azure.com)."
+          : "Azure requires SSL — ensure database_url uses the Azure hostname or set database_ssl_servername."),
     );
   }
   return err instanceof Error ? err : new Error(message);
