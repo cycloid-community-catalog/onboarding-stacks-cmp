@@ -9,7 +9,7 @@ import {
   type DbTarget,
 } from "./network-diagnostics.ts";
 
-const PLUGIN_VERSION = "2.2.3";
+const PLUGIN_VERSION = "2.2.4";
 
 const APP_ROLES = ["readonly", "readwrite", "admin"] as const;
 type AppRole = (typeof APP_ROLES)[number];
@@ -617,7 +617,7 @@ function boolCell(value: boolean): string {
 
 function renderUserRows(users: PgUserRow[], syncedAt: string): string {
   if (users.length === 0) {
-    return `<tr><td colspan="8" class="muted">No application users found.</td></tr>`;
+    return `<tr><td colspan="7" class="muted">No application users found.</td></tr>`;
   }
   return users
     .map(
@@ -724,8 +724,8 @@ function renderUsersPage(users: PgUserRow[], syncedAt: string, error = ""): stri
 function renderUsersShell(instantReport: ReturnType<typeof buildInstantDiagnosticsReport>): string {
   const embeddedDiagnostics = JSON.stringify(instantReport).replace(/<\//g, "<\\/");
   const page = renderUsersPage([], "", "").replace(
-    `<tbody id="users-body"><tr><td colspan="8" class="muted">No application users found.</td></tr></tbody>`,
-    `<tbody id="users-body"><tr><td colspan="8" class="muted">Loading users…</td></tr></tbody>`,
+    `<tbody id="users-body"><tr><td colspan="7" class="muted">No application users found.</td></tr></tbody>`,
+    `<tbody id="users-body"><tr><td colspan="7" class="muted">Loading users…</td></tr></tbody>`,
   );
 
   const script = `
@@ -798,7 +798,7 @@ function renderUsersShell(instantReport: ReturnType<typeof buildInstantDiagnosti
     const users = data.users || [];
     const syncedAt = data.syncedAt || "";
     if (users.length === 0) {
-      bodyEl.innerHTML = '<tr><td colspan="8" class="muted">No application users found.</td></tr>';
+      bodyEl.innerHTML = '<tr><td colspan="7" class="muted">No application users found.</td></tr>';
       return;
     }
     bodyEl.innerHTML = users.map((user) => \`
@@ -811,24 +811,13 @@ function renderUsersShell(instantReport: ReturnType<typeof buildInstantDiagnosti
         <td>\${user.canCreateRole ? "yes" : "no"}</td>
         <td>\${syncedAt}</td>
       </tr>\`).join("");
-    bodyEl.querySelectorAll("tr").forEach((row, i) => {
-      const td = document.createElement("td");
-      td.className = "actions";
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = "btn btn-danger delete-user";
-      btn.title = "Delete user";
-      btn.dataset.username = users[i].username;
-      btn.textContent = "\u00d7";
-      td.appendChild(btn);
-      row.appendChild(td);
-    });
+    document.dispatchEvent(new CustomEvent("users-loaded", { detail: { bodyEl, users } }));
   } catch (err) {
     const msg = err.name === "AbortError"
       ? "Request timed out after 20s. Check database_url and network access to PostgreSQL."
       : (err.message || String(err));
     if (alertEl) { alertEl.hidden = false; alertEl.textContent = msg; }
-    bodyEl.innerHTML = '<tr><td colspan="8" class="muted">Failed to load users.</td></tr>';
+    bodyEl.innerHTML = '<tr><td colspan="7" class="muted">Failed to load users.</td></tr>';
     showDiagnostics(embeddedDiagnostics);
   } finally {
     clearTimeout(timeout);
@@ -861,27 +850,57 @@ function renderUsersShell(instantReport: ReturnType<typeof buildInstantDiagnosti
       }
     });
   }
-
-  if (bodyEl) {
-    bodyEl.addEventListener("click", async (event) => {
-      const btn = event.target.closest(".delete-user");
-      if (!btn) return;
-      const username = btn.dataset.username;
-      if (!username || !confirm("Delete PostgreSQL user \"" + username + "\"?")) return;
-      btn.disabled = true;
-      try {
-        const apiUrl = await pluginApiUrl("/api/users/" + encodeURIComponent(username));
-        const res = await fetch(apiUrl, { method: "DELETE", headers: { accept: "application/json" } });
-        const data = await res.json().catch(() => null);
-        if (!res.ok) throw new Error((data && data.error) || ("HTTP " + res.status));
-        location.reload();
-      } catch (err) {
-        if (alertEl) { alertEl.hidden = false; alertEl.textContent = err.message || String(err); }
-        btn.disabled = false;
-      }
-    });
-  }
 })();
+</script>
+<script>
+document.addEventListener("users-loaded", function(event) {
+  const alertEl = document.getElementById("alert");
+  const bodyEl = event.detail && event.detail.bodyEl;
+  const users = (event.detail && event.detail.users) || [];
+  if (!bodyEl || !users.length) return;
+
+  async function pluginApiUrl(path) {
+    const url = new URL(window.location.href);
+    url.searchParams.set("path", path);
+    return url.href;
+  }
+
+  bodyEl.querySelectorAll("tr").forEach(function(row, i) {
+    var td = document.createElement("td");
+    td.className = "actions";
+    var btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "btn btn-danger delete-user";
+    btn.title = "Delete user";
+    btn.dataset.username = users[i].username;
+    btn.textContent = "x";
+    td.appendChild(btn);
+    row.appendChild(td);
+  });
+
+  bodyEl.addEventListener("click", async function(ev) {
+    var target = ev.target;
+    var btn = target && target.classList && target.classList.contains("delete-user")
+      ? target
+      : (target && target.parentElement && target.parentElement.classList.contains("delete-user")
+        ? target.parentElement
+        : null);
+    if (!btn) return;
+    var username = btn.dataset.username;
+    if (!username || !confirm("Delete PostgreSQL user \\"" + username + "\\"?")) return;
+    btn.disabled = true;
+    try {
+      var apiUrl = await pluginApiUrl("/api/users/" + encodeURIComponent(username));
+      var res = await fetch(apiUrl, { method: "DELETE", headers: { accept: "application/json" } });
+      var data = await res.json().catch(function() { return null; });
+      if (!res.ok) throw new Error((data && data.error) || ("HTTP " + res.status));
+      location.reload();
+    } catch (err) {
+      if (alertEl) { alertEl.hidden = false; alertEl.textContent = err.message || String(err); }
+      btn.disabled = false;
+    }
+  });
+});
 </script>`;
 
   return page.replace("</body>", `${script}</body>`);
