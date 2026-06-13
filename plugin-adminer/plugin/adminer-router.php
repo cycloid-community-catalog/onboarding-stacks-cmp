@@ -7,16 +7,16 @@ if (!isset($_SERVER['HTTP_HOST']) || $_SERVER['HTTP_HOST'] === '') {
     $_SERVER['HTTP_HOST'] = '127.0.0.1';
 }
 
-// Session cookie must be scoped to the Cycloid iframe path and marked SameSite=None
-// so it persists when the console (console.cycloid.io) embeds api.us.cycloid.io.
-$basePath = trim($_SERVER['HTTP_X_PLUGIN_BASE_PATH'] ?? '', '/');
-$cookiePath = $basePath !== '' ? '/' . $basePath . '/' : '/';
+// Cross-site iframe (console.cycloid.io → api.us.cycloid.io): cookies need SameSite=None.
+// Path=/ covers all iframe URLs on the API host. URL session fallback if cookies are blocked.
 session_set_cookie_params([
     'lifetime' => 0,
-    'path' => $cookiePath,
+    'path' => '/',
     'secure' => true,
     'httponly' => true,
     'samesite' => 'None',
 ]);
+ini_set('session.use_trans_sid', '1');
+ini_set('session.use_only_cookies', '0');
 
 require __DIR__ . '/adminer.php';
