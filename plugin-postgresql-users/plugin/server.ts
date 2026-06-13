@@ -9,7 +9,7 @@ import {
   type DbTarget,
 } from "./network-diagnostics.ts";
 
-const PLUGIN_VERSION = "2.2.2";
+const PLUGIN_VERSION = "2.2.3";
 
 const APP_ROLES = ["readonly", "readwrite", "admin"] as const;
 type AppRole = (typeof APP_ROLES)[number];
@@ -810,8 +810,19 @@ function renderUsersShell(instantReport: ReturnType<typeof buildInstantDiagnosti
         <td>\${user.canCreateDb ? "yes" : "no"}</td>
         <td>\${user.canCreateRole ? "yes" : "no"}</td>
         <td>\${syncedAt}</td>
-        <td class="actions"><button type="button" class="btn btn-danger delete-user" title="Delete user" data-username="\${user.username}">&#128465;</button></td>
       </tr>\`).join("");
+    bodyEl.querySelectorAll("tr").forEach((row, i) => {
+      const td = document.createElement("td");
+      td.className = "actions";
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "btn btn-danger delete-user";
+      btn.title = "Delete user";
+      btn.dataset.username = users[i].username;
+      btn.textContent = "\u00d7";
+      td.appendChild(btn);
+      row.appendChild(td);
+    });
   } catch (err) {
     const msg = err.name === "AbortError"
       ? "Request timed out after 20s. Check database_url and network access to PostgreSQL."
