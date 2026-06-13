@@ -10,6 +10,7 @@ if (!Number.isFinite(port) || port <= 0) {
 const ADMINER_PORT = process.env.ADMINER_PORT?.trim() || "8081";
 const ADMINER_MOUNT = "/adminer";
 const SESSION_TTL_MS = 24 * 60 * 60 * 1000;
+const MAX_INTERNAL_REDIRECTS = 5;
 
 /** Cycloid may not forward browser Cookie headers to the plugin; bridge Adminer sessions in-process. */
 const adminerSessions = new Map<string, { cookieHeader: string; updatedAt: number }>();
@@ -122,6 +123,50 @@ function saveAdminerSessionFromCookies(key: string, setCookies: string[]): void 
   if (key) adminerSessions.set(key, entry);
   const sid = incoming.get("adminer_sid");
   if (sid) adminerSessions.set(`sid:${sid}`, entry);
+}
+
+/** Map Adminer Location (relative or absolute) to upstream path on 127.0.0.1. */
+function locationToAdminerPath(location: string): string {
+  let pathAndQuery = location.trim();
+  if (!pathAndQuery || pathAndQuery === ".") return "/";
+
+  if (/^https?:\/\//i.test(pathAndQuery)) {
+    try {
+      const parsed = new URL(pathAndQuery);
+      pathAndQuery = `${parsed.pathname}${parsed.search}`;
+    } catch {
+      return "/";
+    }
+  }
+
+  if (pathAndQuery.startsWith("./")) pathAndQuery = pathAndQuery.slice(2);
+  if (pathAndQuery.startsWith("?")) pathAndQuery = `/${pathAndQuery}`;
+
+  const qIdx = pathAndQuery.indexOf("?");
+  const pathPart = qIdx >= 0 ? pathAndQuery.slice(0, qIdx) : pathAndQuery;
+  const query = qIdx >= 0 ? pathAndQuery.slice(qIdx) : "";
+
+  let adminerPath = pathPart.startsWith("/") ? pathPart : `/${pathPart}`;
+  adminerPath = toAdminerPath(adminerPath);
+  return `${adminerPath}${query}`;
+}
+
+function buildUpstreamHeaders(
+  req: IncomingMessage,
+  sessionKey: string,
+  body: Buffer | undefined,
+): Record<string, string> {
+  const headers: Record<string, string> = {};
+  for (const [key, value] of Object.entries(req.headers)) {
+    if (value === undefined || key === "host") continue;
+    headers[key] = Array.isArray(value) ? value.join(", ") : value;
+  }
+  headers.host = `127.0.0.1:${ADMINER_PORT}`;
+  applyStoredAdminerSession(req, sessionKey);
+  if (req.headers.cookie) headers.cookie = String(req.headers.cookie);
+  rememberOutgoingAdminerCookies(sessionKey, headers.cookie);
+  if (body !== undefined) headers["content-length"] = String(body.length);
+  return headers;
 }
 
 function rememberOutgoingAdminerCookies(key: string, cookieHeader: string | undefined): void {
@@ -394,6 +439,7 @@ function filterProxyResponseHeaders(
   publicBasePath: string,
   sessionKey: string,
   origin: string,
+  opts: { stripLocation?: boolean } = {},
 ): Record<string, string | string[]> {
   const out: Record<string, string | string[]> = {};
   let rewrittenLocation = "";
@@ -401,9 +447,12 @@ function filterProxyResponseHeaders(
     if (value === undefined) continue;
     const lower = key.toLowerCase();
     if (HOP_BY_HOP_HEADERS.has(lower) || STRIPPED_RESPONSE_HEADERS.has(lower)) continue;
-    if (lower === "location" && typeof value === "string") {
-      rewrittenLocation = rewriteLocation(value, publicBasePath, sessionKey, origin);
-      out[key] = rewrittenLocation;
+    if (lower === "location") {
+      if (opts.stripLocation) continue;
+      if (typeof value === "string") {
+        rewrittenLocation = rewriteLocation(value, publicBasePath, sessionKey, origin);
+        out[key] = rewrittenLocation;
+      }
       continue;
     }
     if (lower === "set-cookie") {
@@ -472,7 +521,8 @@ function sendAdminerShell(res: ServerResponse): void {
 <style>html,body{margin:0;height:100%;overflow:hidden;position:relative}iframe{width:100%;height:100%;border:0;display:block}.cy-open-tab{position:absolute;top:8px;right:12px;z-index:1;font:13px/1.4 sans-serif}.cy-open-tab a{color:#1c9797}</style>
 </head><body>
 <p class="cy-open-tab"><a href="adminer/" target="_blank" rel="noopener">Open Adminer in new tab</a></p>
-<iframe src="adminer/" title="Adminer"></iframe>
+<iframe id="adminer" title="Adminer"></iframe>
+<script>(function(){var sk=location.pathname.replace(/\\/?$/,"")+"/adminer";var q="_cy_sk="+encodeURIComponent(sk);document.getElementById("adminer").src="adminer/?"+q;document.querySelector(".cy-open-tab a").href="adminer/?"+q})();</script>
 </body></html>`;
   res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
   res.end(html);
@@ -484,6 +534,119 @@ async function readRequestBody(req: IncomingMessage): Promise<Buffer | undefined
   const chunks: Buffer[] = [];
   for await (const chunk of req) chunks.push(chunk as Buffer);
   return Buffer.concat(chunks);
+}
+
+type AdminerProxyContext = {
+  req: IncomingMessage;
+  res: ServerResponse;
+  publicBase: { href: string; path: string };
+  sessionKey: string;
+  origin: string;
+  bridged: boolean;
+  redirectCount: number;
+};
+
+function respondAdminerUpstream(
+  ctx: AdminerProxyContext,
+  upstreamRes: IncomingMessage,
+  internalizedRedirect: boolean,
+): void {
+  saveAdminerSessionFromCookies(ctx.sessionKey, collectSetCookies(upstreamRes.headers));
+
+  const contentType = String(upstreamRes.headers["content-type"] ?? "");
+  const isHtml = contentType.includes("text/html");
+  const responseHeaders = filterProxyResponseHeaders(
+    upstreamRes.headers,
+    ctx.publicBase.path,
+    ctx.sessionKey,
+    ctx.origin,
+    { stripLocation: internalizedRedirect },
+  );
+  const stored = ctx.sessionKey ? adminerSessions.get(ctx.sessionKey) : undefined;
+  const cookieNames = stored ? [...parseCookieHeader(stored.cookieHeader).keys()].join(",") : "-";
+  responseHeaders["x-cy-adminer-debug"] =
+    `key=${ctx.sessionKey || "-"} bridged=${ctx.bridged} stored=${Boolean(stored)} cookies=${cookieNames} redirects=${ctx.redirectCount}`;
+
+  const statusCode =
+    internalizedRedirect && (upstreamRes.statusCode ?? 0) >= 300 && (upstreamRes.statusCode ?? 0) < 400
+      ? 200
+      : (upstreamRes.statusCode ?? 502);
+
+  if (!isHtml) {
+    delete responseHeaders["content-length"];
+    ctx.res.writeHead(statusCode, responseHeaders);
+    upstreamRes.pipe(ctx.res);
+    return;
+  }
+
+  const chunks: Buffer[] = [];
+  upstreamRes.on("data", (chunk: Buffer) => chunks.push(chunk));
+  upstreamRes.on("end", () => {
+    const raw = Buffer.concat(chunks).toString("utf8");
+    const body = Buffer.from(injectIframeFixes(raw, ctx.publicBase), "utf8");
+    responseHeaders["content-length"] = String(body.length);
+    ctx.res.writeHead(statusCode, responseHeaders);
+    ctx.res.end(body);
+  });
+}
+
+function dispatchAdminerRequest(
+  ctx: AdminerProxyContext,
+  method: string,
+  targetPath: string,
+  headers: Record<string, string>,
+  body: Buffer | undefined,
+): void {
+  const upstream = httpRequest(
+    {
+      hostname: "127.0.0.1",
+      port: Number(ADMINER_PORT),
+      path: targetPath,
+      method,
+      headers,
+    },
+    (upstreamRes) => {
+      saveAdminerSessionFromCookies(ctx.sessionKey, collectSetCookies(upstreamRes.headers));
+
+      const status = upstreamRes.statusCode ?? 502;
+      const location = upstreamRes.headers.location;
+      const canFollow =
+        status >= 300 &&
+        status < 400 &&
+        typeof location === "string" &&
+        ctx.redirectCount < MAX_INTERNAL_REDIRECTS;
+
+      if (canFollow) {
+        upstreamRes.resume();
+        const followPath = locationToAdminerPath(location);
+        applyStoredAdminerSession(ctx.req, ctx.sessionKey);
+
+        console.log(
+          `[INFO] adminer internal redirect ${ctx.redirectCount + 1} ${location} → ${followPath}`,
+        );
+
+        return dispatchAdminerRequest(
+          { ...ctx, redirectCount: ctx.redirectCount + 1 },
+          "GET",
+          followPath,
+          buildUpstreamHeaders(ctx.req, ctx.sessionKey, undefined),
+          undefined,
+        );
+      }
+
+      respondAdminerUpstream(ctx, upstreamRes, ctx.redirectCount > 0);
+    },
+  );
+
+  upstream.on("error", (err) => {
+    ctx.res.writeHead(502, { "content-type": "text/plain; charset=utf-8" });
+    ctx.res.end(`Adminer unavailable: ${(err as Error).message}`);
+  });
+
+  if (body !== undefined) {
+    upstream.write(body);
+    upstream.end();
+  }
 }
 
 function proxyAdminer(
@@ -500,79 +663,28 @@ function proxyAdminer(
   const sessionKey = resolveSessionKey(req, search, body, publicBase.path);
   pruneAdminerSessions();
   const bridged = applyStoredAdminerSession(req, sessionKey);
-
   const upstreamBody = body !== undefined ? stripCySessionFromBody(body) : undefined;
-
-  const headers: Record<string, string> = {};
-  for (const [key, value] of Object.entries(req.headers)) {
-    if (value === undefined || key === "host") continue;
-    headers[key] = Array.isArray(value) ? value.join(", ") : value;
-  }
-  headers.host = `127.0.0.1:${ADMINER_PORT}`;
+  const headers = buildUpstreamHeaders(req, sessionKey, upstreamBody);
 
   console.log(
     `[INFO] adminer session key=${sessionKey || "(none)"} cookie=${hasAdminerCookie(headers.cookie) ? "yes" : "no"} bridged=${bridged}`,
   );
 
-  if (upstreamBody !== undefined) {
-    headers["content-length"] = String(upstreamBody.length);
-  }
-
-  rememberOutgoingAdminerCookies(sessionKey, headers.cookie);
-
-  const upstream = httpRequest(
+  dispatchAdminerRequest(
     {
-      hostname: "127.0.0.1",
-      port: Number(ADMINER_PORT),
-      path: targetPath,
-      method: req.method,
-      headers,
+      req,
+      res,
+      publicBase,
+      sessionKey,
+      origin: requestOrigin(req),
+      bridged,
+      redirectCount: 0,
     },
-    (upstreamRes) => {
-      saveAdminerSessionFromCookies(sessionKey, collectSetCookies(upstreamRes.headers));
-
-      const contentType = String(upstreamRes.headers["content-type"] ?? "");
-      const isHtml = contentType.includes("text/html");
-      const origin = requestOrigin(req);
-      const responseHeaders = filterProxyResponseHeaders(
-        upstreamRes.headers,
-        publicBase.path,
-        sessionKey,
-        origin,
-      );
-      responseHeaders["x-cy-adminer-debug"] =
-        `key=${sessionKey || "-"} bridged=${bridged} stored=${sessionKey ? adminerSessions.has(sessionKey) : false}`;
-
-      if (!isHtml) {
-        delete responseHeaders["content-length"];
-        res.writeHead(upstreamRes.statusCode ?? 502, responseHeaders);
-        upstreamRes.pipe(res);
-        return;
-      }
-
-      const chunks: Buffer[] = [];
-      upstreamRes.on("data", (chunk: Buffer) => chunks.push(chunk));
-      upstreamRes.on("end", () => {
-        const raw = Buffer.concat(chunks).toString("utf8");
-        const body = Buffer.from(injectIframeFixes(raw, publicBase), "utf8");
-        responseHeaders["content-length"] = String(body.length);
-        res.writeHead(upstreamRes.statusCode ?? 502, responseHeaders);
-        res.end(body);
-      });
-    },
+    req.method ?? "GET",
+    targetPath,
+    headers,
+    upstreamBody,
   );
-
-  upstream.on("error", (err) => {
-    res.writeHead(502, { "content-type": "text/plain; charset=utf-8" });
-    res.end(`Adminer unavailable: ${(err as Error).message}`);
-  });
-
-  if (upstreamBody !== undefined) {
-    upstream.write(upstreamBody);
-    upstream.end();
-  } else {
-    req.pipe(upstream);
-  }
 }
 
 const server = createServer(async (req, res) => {
