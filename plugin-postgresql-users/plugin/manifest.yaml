@@ -1,4 +1,4 @@
-description: "Iframe table to list and manage PostgreSQL application users."
+description: "Read-only iframe table listing PostgreSQL database users."
 icon: "https://cycloid-demo-stacks-logo.s3.eu-west-1.amazonaws.com/postgresql.svg"
 
 configuration:

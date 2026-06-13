@@ -9,7 +9,7 @@ import {
   type DbTarget,
 } from "./network-diagnostics.ts";
 
-const PLUGIN_VERSION = "2.1.1";
+const PLUGIN_VERSION = "2.1.2";
 
 const APP_ROLES = ["readonly", "readwrite", "admin"] as const;
 type AppRole = (typeof APP_ROLES)[number];
@@ -579,12 +579,12 @@ function boolCell(value: boolean): string {
 
 function renderUserRows(users: PgUserRow[], syncedAt: string): string {
   if (users.length === 0) {
-    return `<tr><td colspan="8" class="muted">No application users found.</td></tr>`;
+    return `<tr><td colspan="7" class="muted">No application users found.</td></tr>`;
   }
   return users
     .map(
       (user) => `
-      <tr data-username="${escapeHtml(user.username)}">
+      <tr>
         <td>${escapeHtml(user.username)}</td>
         <td>${escapeHtml(user.appRole)}</td>
         <td>${escapeHtml(user.roles)}</td>
@@ -592,7 +592,6 @@ function renderUserRows(users: PgUserRow[], syncedAt: string): string {
         <td>${boolCell(user.canCreateDb)}</td>
         <td>${boolCell(user.canCreateRole)}</td>
         <td>${escapeHtml(syncedAt)}</td>
-        <td class="actions"><button type="button" class="btn btn-danger delete-user" title="Delete user" data-username="${escapeHtml(user.username)}">🗑</button></td>
       </tr>`,
     )
     .join("");
@@ -628,32 +627,13 @@ function renderUsersPage(users: PgUserRow[], syncedAt: string, error = ""): stri
     .diag pre { margin: 0.75rem 0 0; padding: 0.75rem; background: #0f172a; color: #e2e8f0; border-radius: 8px; overflow: auto; font-size: 0.75rem; line-height: 1.4; max-height: 420px; white-space: pre-wrap; word-break: break-word; }
     .diag-actions { margin-top: 0.5rem; display: flex; gap: 0.5rem; }
     .diag-actions button { font: inherit; font-size: 0.8125rem; padding: 0.35rem 0.65rem; border-radius: 6px; border: 1px solid #c5cee0; background: #fff; cursor: pointer; }
-    .toolbar { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: end; margin-bottom: 1rem; padding: 0.875rem 1rem; background: #fff; border: 1px solid #d8deea; border-radius: 10px; }
-    .toolbar label { display: flex; flex-direction: column; gap: 0.25rem; font-size: 0.75rem; color: #5c677f; }
-    .toolbar input, .toolbar select { font: inherit; font-size: 0.875rem; padding: 0.4rem 0.55rem; border: 1px solid #c5cee0; border-radius: 6px; min-width: 10rem; }
-    .btn { font: inherit; font-size: 0.875rem; padding: 0.45rem 0.85rem; border-radius: 6px; border: 1px solid #c5cee0; background: #fff; cursor: pointer; }
-    .btn-primary { background: #1a6fb5; border-color: #1a6fb5; color: #fff; }
-    .btn-danger { color: #b71c1c; border-color: #ef9a9a; background: #fff; padding: 0.25rem 0.45rem; line-height: 1; }
-    .actions { width: 3rem; text-align: center; }
   </style>
 </head>
 <body>
   <main>
     <h1>PostgreSQL users</h1>
-    <p class="muted">Manage application login roles</p>
+    <p class="muted">Read-only list of application login roles</p>
     ${errorBlock}
-    <form id="add-user-form" class="toolbar">
-      <label>Username<input name="username" required pattern="[a-z][a-z0-9_]*" autocomplete="off" /></label>
-      <label>Password<input name="password" type="password" required minlength="8" autocomplete="new-password" /></label>
-      <label>Application role
-        <select name="appRole">
-          <option value="readonly">readonly</option>
-          <option value="readwrite" selected>readwrite</option>
-          <option value="admin">admin</option>
-        </select>
-      </label>
-      <button type="submit" class="btn btn-primary">Add user</button>
-    </form>
     <div class="card">
       <table>
         <thead>
@@ -665,7 +645,6 @@ function renderUsersPage(users: PgUserRow[], syncedAt: string, error = ""): stri
             <th>Can create DB</th>
             <th>Can create role</th>
             <th>Last synced</th>
-            <th class="actions"></th>
           </tr>
         </thead>
         <tbody id="users-body">${rows}</tbody>
@@ -687,8 +666,8 @@ function renderUsersPage(users: PgUserRow[], syncedAt: string, error = ""): stri
 function renderUsersShell(instantReport: ReturnType<typeof buildInstantDiagnosticsReport>): string {
   const embeddedDiagnostics = JSON.stringify(instantReport).replace(/<\//g, "<\\/");
   const page = renderUsersPage([], "", "").replace(
-    `<tbody id="users-body"><tr><td colspan="8" class="muted">No application users found.</td></tr></tbody>`,
-    `<tbody id="users-body"><tr><td colspan="8" class="muted">Loading users…</td></tr></tbody>`,
+    `<tbody id="users-body"><tr><td colspan="7" class="muted">No application users found.</td></tr></tbody>`,
+    `<tbody id="users-body"><tr><td colspan="7" class="muted">Loading users…</td></tr></tbody>`,
   );
 
   const script = `
@@ -715,104 +694,6 @@ function renderUsersShell(instantReport: ReturnType<typeof buildInstantDiagnosti
     const url = new URL(window.location.href);
     url.searchParams.set("path", path);
     return url.href;
-  }
-
-  function renderUsers(users, syncedAt) {
-    if (!bodyEl) return;
-    if (users.length === 0) {
-      bodyEl.innerHTML = '<tr><td colspan="8" class="muted">No application users found.</td></tr>';
-      return;
-    }
-    bodyEl.innerHTML = users.map((user) => \`
-      <tr data-username="\${user.username}">
-        <td>\${user.username}</td>
-        <td>\${user.appRole}</td>
-        <td>\${user.roles}</td>
-        <td>\${user.isSuperuser ? "yes" : "no"}</td>
-        <td>\${user.canCreateDb ? "yes" : "no"}</td>
-        <td>\${user.canCreateRole ? "yes" : "no"}</td>
-        <td>\${syncedAt}</td>
-        <td class="actions"><button type="button" class="btn btn-danger delete-user" title="Delete user" data-username="\${user.username}">🗑</button></td>
-      </tr>\`).join("");
-  }
-
-  async function loadUsers() {
-    const apiUrl = await pluginApiUrl("/api/users");
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 20000);
-    try {
-      const res = await fetch(apiUrl, { headers: { accept: "application/json" }, signal: controller.signal });
-      const text = await res.text();
-      let data = null;
-      try { data = text ? JSON.parse(text) : null; } catch { throw new Error(text.slice(0, 240) || ("HTTP " + res.status)); }
-      if (!res.ok) throw new Error((data && data.error) || ("HTTP " + res.status));
-      if (alertEl) alertEl.hidden = true;
-      renderUsers(data.users || [], data.syncedAt || "");
-    } catch (err) {
-      const msg = err.name === "AbortError"
-        ? "Request timed out after 20s. Check database_url and network access to PostgreSQL."
-        : (err.message || String(err));
-      if (alertEl) { alertEl.hidden = false; alertEl.textContent = msg; }
-      if (bodyEl) bodyEl.innerHTML = '<tr><td colspan="8" class="muted">Failed to load users.</td></tr>';
-      showDiagnostics(embeddedDiagnostics);
-    } finally {
-      clearTimeout(timeout);
-    }
-  }
-
-  await loadUsers();
-
-  const addForm = document.getElementById("add-user-form");
-  if (addForm) {
-    addForm.addEventListener("submit", async (event) => {
-      event.preventDefault();
-      const form = event.currentTarget;
-      const username = form.username.value.trim();
-      const password = form.password.value;
-      const appRole = form.appRole.value;
-      const submitBtn = form.querySelector('button[type="submit"]');
-      if (submitBtn) submitBtn.disabled = true;
-      try {
-        const apiUrl = await pluginApiUrl("/api/users");
-        const res = await fetch(apiUrl, {
-          method: "POST",
-          headers: { "content-type": "application/json", accept: "application/json" },
-          body: JSON.stringify({ username, password, appRole }),
-        });
-        const data = await res.json().catch(() => null);
-        if (!res.ok) throw new Error((data && data.error) || ("HTTP " + res.status));
-        form.reset();
-        form.appRole.value = "readwrite";
-        if (alertEl) alertEl.hidden = true;
-        await loadUsers();
-      } catch (err) {
-        if (alertEl) { alertEl.hidden = false; alertEl.textContent = err.message || String(err); }
-      } finally {
-        if (submitBtn) submitBtn.disabled = false;
-      }
-    });
-  }
-
-  if (bodyEl) {
-    bodyEl.addEventListener("click", async (event) => {
-      const btn = event.target.closest(".delete-user");
-      if (!btn) return;
-      const username = btn.dataset.username;
-      if (!username) return;
-      if (!confirm("Delete PostgreSQL user \"" + username + "\"?")) return;
-      btn.disabled = true;
-      try {
-        const apiUrl = await pluginApiUrl("/api/users/" + encodeURIComponent(username));
-        const res = await fetch(apiUrl, { method: "DELETE", headers: { accept: "application/json" } });
-        const data = await res.json().catch(() => null);
-        if (!res.ok) throw new Error((data && data.error) || ("HTTP " + res.status));
-        if (alertEl) alertEl.hidden = true;
-        await loadUsers();
-      } catch (err) {
-        if (alertEl) { alertEl.hidden = false; alertEl.textContent = err.message || String(err); }
-        btn.disabled = false;
-      }
-    });
   }
 
   async function runDiagnostics() {
@@ -845,6 +726,43 @@ function renderUsersShell(instantReport: ReturnType<typeof buildInstantDiagnosti
     });
   }
   if (diagRefresh) diagRefresh.addEventListener("click", () => { runDiagnostics(); });
+
+  const apiUrl = await pluginApiUrl("/api/users");
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 20000);
+  try {
+    const res = await fetch(apiUrl, { headers: { accept: "application/json" }, signal: controller.signal });
+    const text = await res.text();
+    let data = null;
+    try { data = text ? JSON.parse(text) : null; } catch { throw new Error(text.slice(0, 240) || ("HTTP " + res.status)); }
+    if (!res.ok) throw new Error((data && data.error) || ("HTTP " + res.status));
+    if (alertEl) alertEl.hidden = true;
+    const users = data.users || [];
+    const syncedAt = data.syncedAt || "";
+    if (users.length === 0) {
+      bodyEl.innerHTML = '<tr><td colspan="7" class="muted">No application users found.</td></tr>';
+      return;
+    }
+    bodyEl.innerHTML = users.map((user) => \`
+      <tr>
+        <td>\${user.username}</td>
+        <td>\${user.appRole}</td>
+        <td>\${user.roles}</td>
+        <td>\${user.isSuperuser ? "yes" : "no"}</td>
+        <td>\${user.canCreateDb ? "yes" : "no"}</td>
+        <td>\${user.canCreateRole ? "yes" : "no"}</td>
+        <td>\${syncedAt}</td>
+      </tr>\`).join("");
+  } catch (err) {
+    const msg = err.name === "AbortError"
+      ? "Request timed out after 20s. Check database_url and network access to PostgreSQL."
+      : (err.message || String(err));
+    if (alertEl) { alertEl.hidden = false; alertEl.textContent = msg; }
+    bodyEl.innerHTML = '<tr><td colspan="7" class="muted">Failed to load users.</td></tr>';
+    showDiagnostics(embeddedDiagnostics);
+  } finally {
+    clearTimeout(timeout);
+  }
 })();
 </script>`;
 
