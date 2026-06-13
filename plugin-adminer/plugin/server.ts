@@ -111,8 +111,54 @@ function collectSetCookies(headers: IncomingHttpHeaders): string[] {
   return Array.isArray(value) ? value.map(String) : [String(value)];
 }
 
+function resolveSessionKey(
+  req: IncomingMessage,
+  search: string,
+  body: Buffer | undefined,
+  publicBasePath: string,
+): string {
+  let key = adminerSessionKey(req, search, body);
+  if (!key && publicBasePath) key = publicBasePath;
+  if (!key && adminerSessions.size === 1) {
+    key = adminerSessions.keys().next().value ?? "";
+  }
+  return key;
+}
+
+function appendSessionKeyToPath(pathAndQuery: string, sessionKey: string): string {
+  if (!sessionKey || pathAndQuery.includes("_cy_sk=")) return pathAndQuery;
+  const q = pathAndQuery.indexOf("?");
+  const path = q >= 0 ? pathAndQuery.slice(0, q) : pathAndQuery;
+  const query = q >= 0 ? pathAndQuery.slice(q + 1) : "";
+  const params = new URLSearchParams(query);
+  params.set("_cy_sk", sessionKey);
+  const qs = params.toString();
+  return qs ? `${path}?${qs}` : path;
+}
+
 function hasAdminerCookie(header: string | undefined): boolean {
   return /(?:^|;\s*)adminer_sid=/.test(header ?? "");
+}
+
+function stripExternalVersionCheck(html: string): string {
+  return html.replace(/https?:\/\/www\.adminer\.org\/version\/?[^"']*/gi, "about:blank");
+}
+
+function stripCySessionFromBody(body: Buffer): Buffer {
+  const text = body.toString("utf8");
+  const cleaned = text
+    .replace(/(^|&)_cy_sk=[^&]*/g, "")
+    .replace(/^&/, "")
+    .replace(/&&/g, "&");
+  return Buffer.from(cleaned, "utf8");
+}
+
+function stripCySessionParam(search: string): string {
+  if (!search) return "";
+  const params = new URLSearchParams(search.startsWith("?") ? search.slice(1) : search);
+  params.delete("_cy_sk");
+  const qs = params.toString();
+  return qs ? `?${qs}` : "";
 }
 
 const STRIPPED_RESPONSE_HEADERS = new Set([
@@ -132,8 +178,8 @@ const HOP_BY_HOP_HEADERS = new Set([
   "upgrade",
 ]);
 
-/** Runs in the iframe; rewrites root-relative URLs and tags forms with a stable session key. */
-const IFRAME_CLIENT_SCRIPT = `<script>(function(){function baseDir(){var p=location.pathname;if(p.indexOf("/iframe")<0)return null;if(!p.endsWith("/"))p=p.replace(/\\/[^\\/]+$/,"/");return location.origin+p}function sk(){var m=document.querySelector('meta[name="cy-session-key"]');return m?m.getAttribute("content"):""}function fixUrl(u){var b=baseDir();if(!b||!u)return u;if(/^https?:\\/\\//i.test(u)||u.indexOf("//")===0)return u;if(u.charAt(0)==="/")return b.replace(/\\/$/,"")+u;if(u.charAt(0)==="?")return b.replace(/\\/?$/,"/")+u;return u}var b=baseDir(),key=sk();if(b){document.cookie="cy_adminer_base="+encodeURIComponent(new URL(b).pathname.replace(/\\/$/,""))+"; path=/; secure; samesite=none";if(!document.querySelector("base")){var base=document.createElement("base");base.href=b;(document.head||document.documentElement).prepend(base)}}function patch(){document.querySelectorAll('a[href^="/"],form[action^="/"]').forEach(function(el){var a=el.hasAttribute("href")?"href":"action";el.setAttribute(a,fixUrl(el.getAttribute(a)||""))})}patch();new MutationObserver(patch).observe(document.documentElement,{childList:true,subtree:true});document.addEventListener("submit",function(e){var f=e.target;if(!f||f.nodeName!=="FORM")return;var act=f.getAttribute("action");if(act===null||act===""||act==="/")f.action=fixUrl(act||"/");if(key&&!f.querySelector('input[name="_cy_sk"]')){var i=document.createElement("input");i.type="hidden";i.name="_cy_sk";i.value=key;f.appendChild(i)}},true)})();</script>`;
+/** Client fixes: URL base, session key in URL + forms (Cycloid may not forward cookies). */
+const IFRAME_CLIENT_SCRIPT = `<script>(function(){function sessionKey(){var p=location.pathname;if(p.indexOf("/iframe")<0)return"";if(p.indexOf("/iframe/adminer")<0)p=p.replace(/\\/?$/,"")+"/adminer";return p.replace(/\\/$/,"")}function baseDir(){var k=sessionKey();return k?location.origin+k+"/":null}function fixUrl(u){var b=baseDir();if(!b||!u)return u;if(/^https?:\\/\\//i.test(u)||u.indexOf("//")===0)return u;if(u.charAt(0)==="/")return b.replace(/\\/$/,"")+u;if(u.charAt(0)==="?")return b.replace(/\\/?$/,"/")+u;return u}function withSk(u){var k=sessionKey();if(!k||!u)return u;try{var n=new URL(u,location.href);if(n.origin!==location.origin)return u;if(!n.searchParams.has("_cy_sk"))n.searchParams.set("_cy_sk",k);return n.pathname+n.search+n.hash}catch(e){return u}}var key=sessionKey(),b=baseDir();if(key&&!location.search.includes("_cy_sk=")){try{var u=new URL(location.href);u.searchParams.set("_cy_sk",key);history.replaceState(null,"",u.pathname+u.search)}catch(e){}}if(b&&!document.querySelector("base")){var base=document.createElement("base");base.href=b;(document.head||document.documentElement).prepend(base)}function patch(){document.querySelectorAll("a[href]").forEach(function(el){var h=el.getAttribute("href");if(h&&h.charAt(0)==="/")el.setAttribute("href",withSk(fixUrl(h)))});document.querySelectorAll('form[action^="/"],form:not([action])').forEach(function(el){var a=el.getAttribute("action");if(a&&a.charAt(0)==="/")el.setAttribute("action",withSk(fixUrl(a)))})}patch();new MutationObserver(patch).observe(document.documentElement,{childList:true,subtree:true});document.addEventListener("submit",function(e){var f=e.target;if(!f||f.nodeName!=="FORM")return;var act=f.getAttribute("action");if(!act||act==="/")f.action=withSk(fixUrl(act||"/"));if(key&&!f.querySelector('input[name="_cy_sk"]')){var i=document.createElement("input");i.type="hidden";i.name="_cy_sk";i.value=key;f.appendChild(i)}},true);var of=window.fetch;window.fetch=function(input,init){try{var url=typeof input==="string"?input:input.url;if(url&&url.indexOf("adminer.org")>=0)return Promise.resolve(new Response("{}",{status:200,headers:{"content-type":"application/json"}}))}catch(e){}return of.apply(this,arguments)}})();</script>`;
 
 function parseRequestUrl(req: IncomingMessage): URL {
   const host = req.headers.host?.trim() || "localhost";
@@ -216,7 +262,7 @@ function getPublicBase(req: IncomingMessage, url: URL): { href: string; path: st
   return { href: "", path: "" };
 }
 
-function rewriteLocation(location: string, publicBasePath: string): string {
+function rewriteLocation(location: string, publicBasePath: string, sessionKey: string): string {
   if (!publicBasePath) return location;
 
   let pathAndQuery = location;
@@ -235,15 +281,17 @@ function rewriteLocation(location: string, publicBasePath: string): string {
     }
   }
 
-  if (pathAndQuery.startsWith(publicBasePath)) return pathAndQuery;
-  if (pathAndQuery.startsWith("/")) return `${publicBasePath}${pathAndQuery}`;
-  return `${publicBasePath}/${pathAndQuery}`;
+  if (pathAndQuery.startsWith(publicBasePath)) {
+    return appendSessionKeyToPath(pathAndQuery, sessionKey);
+  }
+  if (pathAndQuery.startsWith("/")) {
+    return appendSessionKeyToPath(`${publicBasePath}${pathAndQuery}`, sessionKey);
+  }
+  return appendSessionKeyToPath(`${publicBasePath}/${pathAndQuery}`, sessionKey);
 }
 
 function rewriteSetCookie(cookie: string, _publicBasePath: string): string {
   let out = cookie;
-  // Keep Path=/ so the cookie is sent on every plugin_widgets request on this host.
-  // Narrow paths break sessions when the proxy path does not match exactly.
   if (/;\s*path=/i.test(out)) {
     out = out.replace(/;\s*path=[^;]*/i, "; Path=/");
   } else {
@@ -251,12 +299,8 @@ function rewriteSetCookie(cookie: string, _publicBasePath: string): string {
   }
   if (!/;\s*samesite=/i.test(out)) {
     out += "; SameSite=None; Secure";
-  } else {
-    out = out.replace(/;\s*samesite=[^;]*/i, "; SameSite=None");
-    if (!/;\s*secure(?:;|$)/i.test(out)) out += "; Secure";
-  }
-  if (!/;\s*partitioned(?:;|$)/i.test(out)) {
-    out += "; Partitioned";
+  } else if (!/;\s*secure(?:;|$)/i.test(out)) {
+    out += "; Secure";
   }
   return out;
 }
@@ -264,6 +308,7 @@ function rewriteSetCookie(cookie: string, _publicBasePath: string): string {
 function filterProxyResponseHeaders(
   headers: IncomingHttpHeaders,
   publicBasePath: string,
+  sessionKey: string,
 ): Record<string, string | string[]> {
   const out: Record<string, string | string[]> = {};
   for (const [key, value] of Object.entries(headers)) {
@@ -271,7 +316,7 @@ function filterProxyResponseHeaders(
     const lower = key.toLowerCase();
     if (HOP_BY_HOP_HEADERS.has(lower) || STRIPPED_RESPONSE_HEADERS.has(lower)) continue;
     if (lower === "location" && typeof value === "string") {
-      out[key] = rewriteLocation(value, publicBasePath);
+      out[key] = rewriteLocation(value, publicBasePath, sessionKey);
       continue;
     }
     if (lower === "set-cookie") {
@@ -295,16 +340,9 @@ function rewriteRootRelativeUrls(html: string, publicBasePath: string): string {
 function injectIframeFixes(html: string, publicBase: { href: string; path: string }): string {
   if (!html.includes("<")) return html;
 
-  let out = html;
+  let out = stripExternalVersionCheck(html);
   if (publicBase.path) {
     out = rewriteRootRelativeUrls(out, publicBase.path);
-    if (!/<meta[^>]+name=["']cy-session-key["']/i.test(out)) {
-      const escapedKey = publicBase.path.replace(/"/g, "&quot;");
-      const meta = `<meta name="cy-session-key" content="${escapedKey}">`;
-      out = /<head[\s>]/i.test(out)
-        ? out.replace(/<head(\s[^>]*)?>/i, (m) => `${m}${meta}`)
-        : `${meta}${out}`;
-    }
     if (publicBase.href && !/<base[\s>]/i.test(out)) {
       const escaped = publicBase.href.replace(/"/g, "&quot;");
       const tag = `<base href="${escaped}">`;
@@ -358,12 +396,13 @@ function proxyAdminer(
   body: Buffer | undefined,
 ): void {
   const adminerPath = toAdminerPath(pathname);
-  const targetPath = `${adminerPath}${search}`;
+  const targetPath = `${adminerPath}${stripCySessionParam(search)}`;
   const publicBase = getPublicBase(req, requestUrl);
-  let sessionKey = adminerSessionKey(req, search, body);
-  if (!sessionKey && publicBase.path) sessionKey = publicBase.path;
+  const sessionKey = resolveSessionKey(req, search, body, publicBase.path);
   pruneAdminerSessions();
   const bridged = applyStoredAdminerSession(req, sessionKey);
+
+  const upstreamBody = body !== undefined ? stripCySessionFromBody(body) : undefined;
 
   const headers: Record<string, string> = {};
   for (const [key, value] of Object.entries(req.headers)) {
@@ -376,8 +415,8 @@ function proxyAdminer(
     `[INFO] adminer session key=${sessionKey || "(none)"} cookie=${hasAdminerCookie(headers.cookie) ? "yes" : "no"} bridged=${bridged}`,
   );
 
-  if (body !== undefined) {
-    headers["content-length"] = String(body.length);
+  if (upstreamBody !== undefined) {
+    headers["content-length"] = String(upstreamBody.length);
   }
 
   const upstream = httpRequest(
@@ -393,7 +432,7 @@ function proxyAdminer(
 
       const contentType = String(upstreamRes.headers["content-type"] ?? "");
       const isHtml = contentType.includes("text/html");
-      const responseHeaders = filterProxyResponseHeaders(upstreamRes.headers, publicBase.path);
+      const responseHeaders = filterProxyResponseHeaders(upstreamRes.headers, publicBase.path, sessionKey);
 
       if (!isHtml) {
         delete responseHeaders["content-length"];
@@ -419,8 +458,8 @@ function proxyAdminer(
     res.end(`Adminer unavailable: ${(err as Error).message}`);
   });
 
-  if (body !== undefined) {
-    upstream.write(body);
+  if (upstreamBody !== undefined) {
+    upstream.write(upstreamBody);
     upstream.end();
   } else {
     req.pipe(upstream);
@@ -445,12 +484,15 @@ const server = createServer(async (req, res) => {
   if (method === "POST" && pathname === "/_cy/resync") return sendJson(res, 200, { started: false });
 
   if (method === "GET" && pathname === `${ADMINER_MOUNT}/_cy/session-debug`) {
-    const sessionKey = adminerSessionKey(req, url.search);
+    const publicBase = getPublicBase(req, url);
+    const sessionKey = resolveSessionKey(req, url.search, undefined, publicBase.path);
     return sendJson(res, 200, {
       sessionKey: sessionKey || null,
       incomingCookie: req.headers.cookie ?? null,
       hasStoredSession: sessionKey ? adminerSessions.has(sessionKey) : false,
+      storedSessionCount: adminerSessions.size,
       referer: req.headers.referer ?? req.headers.referrer ?? null,
+      query: url.search || null,
     });
   }
 
