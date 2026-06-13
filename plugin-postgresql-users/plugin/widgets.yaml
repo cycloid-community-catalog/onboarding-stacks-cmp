@@ -1,9 +1,8 @@
 # Read-only user list rendered as an HTML table inside an iframe.
-# Native Cycloid "table" widgets are not supported on all platform versions (e.g. SaaS v6.10).
 - type: iframe
   placement:
     type: component
     config:
       tab_name: PostgreSQL Users
   widget:
-    query: "/?org=($ .org $)&project=($ .project $)&env=($ .env $)&component=($ .component $)"
+    query: "/"

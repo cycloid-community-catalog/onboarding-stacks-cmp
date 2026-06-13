@@ -1,22 +1,27 @@
 # PostgreSQL Users Cycloid Plugin
 
-Read-only Cycloid plugin for **stack-postgresql** components. It lists PostgreSQL login roles in a **read-only table** on the component tab.
+Read-only Cycloid plugin that lists PostgreSQL login roles in an **iframe** table on a component tab.
 
-> **Note:** Native Cycloid `table` widgets are not supported on all platform versions (including SaaS v6.10). This plugin uses an **iframe** that renders a read-only HTML table — the same approach as [plugin-adminer](https://github.com/cycloid-community-catalog/onboarding-stacks-cmp/tree/master/plugin-adminer).
+System and stack admin accounts (`postgres`, `rdsadmin`, the connection user, …) are excluded from the list.
+
+## Install
+
+Set the database connection at install time:
+
+```bash
+cy plugin upgrade postgresql-users \
+  --config database_url='postgresql://admin:secret@mydb.example.com:5432/postgres'
+```
+
+The plugin container must be able to reach PostgreSQL on the configured host and port.
+
+> **Note:** `database_url` is set once per plugin installation. If you have multiple databases, install the plugin separately for each one (or use a different approach for per-component credentials).
 
 ## Widget
 
 | Tab | Type | Purpose |
 |-----|------|---------|
 | **PostgreSQL Users** | `iframe` | Read-only HTML table of database login roles |
-
-System and stack admin accounts (`postgres`, `rdsadmin`, the Terraform master user, …) are excluded from the list.
-
-## Requirements
-
-- Component deployed with **stack-postgresql** and inventory outputs (`rds_address`, `rds_username`, `rds_password`, …)
-- Plugin container can reach PostgreSQL on port **5432**
-- Plugin Manager injects `PROXY_URL` / `PLUGIN_SECRET`, or install with `cy_api_url` + `cy_api_key`
 
 ## Build and publish
 
@@ -26,25 +31,36 @@ chmod +x scripts/build-and-push.sh
 IMAGE=<registry>/cycloid-plugin-postgresql-users ./scripts/build-and-push.sh
 ```
 
-Then publish/install the plugin version and enable it on the PostgreSQL component.
+Tag must match `package.json` version (semver).
 
 ## Enable on a component
 
-1. **Install** at org level and confirm status is **running** (`cy plugin list`).
-2. **Enable** on the component (`cy plugin component relation-set <install-id-or-name> ... --enabled` or the Plugins UI).
+1. **Install** at org level with `database_url`.
+2. **Enable** on the component (Plugins UI or `cy plugin component relation-set`).
 
 ## Troubleshooting
 
-**`plugin_install_id cannot be null`**
+**Failed to load users / connection timeout**
 
-Install the plugin at the **organization** level first, then enable it on the component.
+- Confirm `database_url` is correct (user, password, host, port, database).
+- Confirm the plugin container can reach the database (security groups, VPC, firewall).
 
 **Empty table**
 
-1. Trigger a resync from Cycloid or wait for a component event to populate SQLite.
-2. Confirm inventory outputs exist for the component.
-3. Confirm the plugin container can reach the database host.
+- The connection user may be the only login role; system/master users are filtered out.
+- Create application users or check that `rolcanlogin` roles exist beyond the master account.
 
-**`PROXY_URL` / API errors**
+## Local smoke test
 
-Reinstall with `cy_api_url` and `cy_api_key`, or fix Plugin Manager configuration (see plugin-adminer README).
+```bash
+cd plugin-postgresql-users/plugin
+npm install
+DATABASE_URL='postgresql://user:pass@localhost:5432/postgres' PORT=8080 \
+  node --experimental-strip-types server.ts
+```
+
+```bash
+curl -fsS http://localhost:8080/_cy/ping
+curl -fsS http://localhost:8080/api/users
+open http://localhost:8080/
+```

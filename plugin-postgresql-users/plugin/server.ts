@@ -1,10 +1,4 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
-import { request as httpRequest } from "node:http";
-import { request as httpsRequest } from "node:https";
-import { DatabaseSync } from "node:sqlite";
 import pg from "pg";
 
 const port = Number(process.env.PORT);
@@ -13,49 +7,7 @@ if (!Number.isFinite(port) || port <= 0) {
   process.exit(1);
 }
 
-function normalizeApiBase(raw: string): string {
-  const trimmed = raw.trim().replace(/\/$/, "");
-  if (!trimmed || trimmed === "<no value>") return "";
-  if (/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(trimmed)) return trimmed;
-  return `https://${trimmed}`;
-}
-
-function normalizeProxyBase(raw: string): string {
-  const trimmed = raw.trim().replace(/\/$/, "");
-  if (!trimmed || trimmed === "<no value>") return "";
-  if (/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(trimmed)) return trimmed;
-  return `http://${trimmed}`;
-}
-
-function apiUrl(path: string, base: string, label: string): URL {
-  try {
-    return new URL(path, base);
-  } catch (err) {
-    throw new Error(
-      `Invalid ${label} "${base}": ${(err as Error).message}. Use a full URL such as https://api.us.cycloid.io or leave cy_api_url empty when PROXY_URL is injected.`,
-    );
-  }
-}
-
-function parseRequestUrl(req: IncomingMessage): URL {
-  const host = req.headers.host?.trim() || "localhost";
-  const base = host.includes("://") ? host : `http://${host}`;
-  try {
-    return new URL(req.url ?? "/", base);
-  } catch {
-    return new URL("/", base);
-  }
-}
-
-const DB_PORT = process.env.DB_PORT?.trim() || "5432";
-const DB_FILE = process.env.DB_FILE?.trim() || ":memory:";
-const PROXY_URL = normalizeProxyBase(process.env.PROXY_URL ?? "");
-const PLUGIN_SECRET = process.env.PLUGIN_SECRET?.trim() ?? "";
-const CY_API_URL = normalizeApiBase(process.env.CY_API_URL ?? "");
-const CY_API_KEY = process.env.CY_API_KEY?.trim() ?? "";
-
-const PLUGIN_DIR = dirname(fileURLToPath(import.meta.url));
-const SCHEMA_SQL = readFileSync(join(PLUGIN_DIR, "schema.sql"), "utf8");
+const DATABASE_URL = process.env.DATABASE_URL?.trim() ?? "";
 
 const SYSTEM_USERS = new Set([
   "postgres",
@@ -66,21 +18,6 @@ const SYSTEM_USERS = new Set([
   "cloudsqladmin",
   "cloudsqlsuperuser",
 ]);
-
-type ComponentCtx = {
-  org: string;
-  project: string;
-  env: string;
-  component: string;
-};
-
-type InventoryOutput = {
-  key?: string;
-  value?: unknown;
-  project_canonical?: string;
-  environment_canonical?: string;
-  component_canonical?: string;
-};
 
 type DbConfig = {
   host: string;
@@ -100,20 +37,40 @@ type PgUserRow = {
   canCreateRole: boolean;
 };
 
-const sqlite = new DatabaseSync(DB_FILE);
-sqlite.exec("PRAGMA foreign_keys = ON");
-sqlite.exec(SCHEMA_SQL);
+if (!DATABASE_URL) {
+  console.warn("[WARN] DATABASE_URL is not set — set database_url at plugin install time");
+} else {
+  console.log("[INFO] database: configured via DATABASE_URL");
+}
 
-console.log(`[INFO] sqlite db: ${DB_FILE}`);
-console.log(
-  `[INFO] cycloid api: ${
-    CY_API_URL && CY_API_KEY
-      ? `direct (${CY_API_URL})`
-      : PROXY_URL
-        ? `proxy (${PROXY_URL}) — set cy_api_key to avoid iframe deadlocks`
-        : "not configured"
-  }`,
-);
+function parseRequestUrl(req: IncomingMessage): URL {
+  const host = req.headers.host?.trim() || "localhost";
+  const base = host.includes("://") ? host : `http://${host}`;
+  try {
+    return new URL(req.url ?? "/", base);
+  } catch {
+    return new URL("/", base);
+  }
+}
+
+function normalizePluginPath(pathname: string): string {
+  const iframeIdx = pathname.indexOf("/iframe");
+  if (iframeIdx >= 0) {
+    const rest = pathname.slice(iframeIdx + "/iframe".length);
+    if (!rest || rest === "/") return "/";
+    return rest.startsWith("/") ? rest : `/${rest}`;
+  }
+  return pathname || "/";
+}
+
+function resolvePathname(url: URL, rawPathname: string): string {
+  const proxyPath = url.searchParams.get("path")?.trim();
+  if (proxyPath) {
+    const normalized = proxyPath.startsWith("/") ? proxyPath : `/${proxyPath}`;
+    return normalized.replace(/\/$/, "") || "/";
+  }
+  return normalizePluginPath(rawPathname);
+}
 
 function send(
   res: ServerResponse,
@@ -134,464 +91,50 @@ function escapeHtml(s: string): string {
     .replaceAll('"', "&quot;");
 }
 
-function normalizePluginPath(pathname: string): string {
-  const iframeIdx = pathname.indexOf("/iframe");
-  if (iframeIdx >= 0) {
-    const rest = pathname.slice(iframeIdx + "/iframe".length);
-    if (!rest || rest === "/") return "/";
-    return rest.startsWith("/") ? rest : `/${rest}`;
-  }
-  return pathname || "/";
-}
-
-const COMPONENT_PATH =
-  /\/organizations\/([^/]+)\/projects\/([^/]+)\/environments\/([^/]+)\/components\/([^/]+)/;
-
-function parseComponentCtxFromPath(pathname: string): ComponentCtx | null {
-  const match = COMPONENT_PATH.exec(pathname);
-  if (!match) return null;
-  return {
-    org: decodeURIComponent(match[1]),
-    project: decodeURIComponent(match[2]),
-    env: decodeURIComponent(match[3]),
-    component: decodeURIComponent(match[4]),
-  };
-}
-
-function parseComponentCtxFromSearch(url: URL): ComponentCtx | null {
-  const org = url.searchParams.get("org")?.trim() ?? "";
-  const project = url.searchParams.get("project")?.trim() ?? "";
-  const env = url.searchParams.get("env")?.trim() ?? "";
-  const component = url.searchParams.get("component")?.trim() ?? "";
-  if (!org || !project || !env || !component) return null;
-  return { org, project, env, component };
-}
-
-function parseComponentCtx(url: URL, req: IncomingMessage, rawPathname: string): ComponentCtx | null {
-  const fromQuery = parseComponentCtxFromSearch(url);
-  if (fromQuery) return fromQuery;
-
-  const fromPath = parseComponentCtxFromPath(rawPathname);
-  if (fromPath) return fromPath;
-
-  const referer = req.headers.referer ?? req.headers.referrer;
-  if (typeof referer === "string" && referer) {
-    try {
-      const ref = new URL(referer);
-      const fromRefQuery = parseComponentCtxFromSearch(ref);
-      if (fromRefQuery) return fromRefQuery;
-      const fromRefPath = parseComponentCtxFromPath(ref.pathname);
-      if (fromRefPath) return fromRefPath;
-    } catch {
-      /* ignore malformed referer */
-    }
-  }
-
-  return null;
-}
-
-function boolCell(value: boolean): string {
-  return value ? "yes" : "no";
-}
-
-function renderUsersPage(ctx: ComponentCtx, users: PgUserRow[], syncedAt: string, error = ""): string {
-  const rows = renderUserRows(users, syncedAt);
-  const errorBlock = error ? `<div id="alert" class="alert">${escapeHtml(error)}</div>` : `<div id="alert" class="alert" hidden></div>`;
-
-  return `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>PostgreSQL users</title>
-  <style>
-    :root { color-scheme: light; font-family: system-ui, sans-serif; }
-    body { margin: 0; background: #f4f6fa; color: #1a2233; }
-    main { padding: 1rem 1.25rem 1.5rem; }
-    h1 { font-size: 1.1rem; margin: 0 0 0.25rem; }
-    .muted { color: #5c677f; font-size: 0.875rem; margin-bottom: 1rem; }
-    .alert { background: #ffebee; color: #b71c1c; padding: 0.75rem 1rem; border-radius: 8px; margin-bottom: 1rem; }
-    .alert[hidden] { display: none; }
-    .card { background: #fff; border: 1px solid #d8deea; border-radius: 10px; overflow: auto; }
-    table { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
-    th, td { border-bottom: 1px solid #e7ebf3; padding: 0.65rem 0.75rem; text-align: left; white-space: nowrap; }
-    th { background: #f8f9fc; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.04em; color: #5c677f; position: sticky; top: 0; }
-    tr:last-child td { border-bottom: 0; }
-  </style>
-</head>
-<body>
-  <main>
-    <h1>PostgreSQL users</h1>
-    <p class="muted">${escapeHtml(ctx.org)} / ${escapeHtml(ctx.project)} / ${escapeHtml(ctx.env)} / ${escapeHtml(ctx.component)}</p>
-    ${errorBlock}
-    <div class="card">
-      <table>
-        <thead>
-          <tr>
-            <th>Username</th>
-            <th>Application role</th>
-            <th>PostgreSQL roles</th>
-            <th>Superuser</th>
-            <th>Can create DB</th>
-            <th>Can create role</th>
-            <th>Last synced</th>
-          </tr>
-        </thead>
-        <tbody id="users-body">${rows}</tbody>
-      </table>
-    </div>
-  </main>
-</body>
-</html>`;
-}
-
-function renderUserRows(users: PgUserRow[], syncedAt: string): string {
-  if (users.length === 0) {
-    return `<tr><td colspan="7" class="muted">No application users found.</td></tr>`;
-  }
-  return users
-    .map(
-      (user) => `
-      <tr>
-        <td>${escapeHtml(user.username)}</td>
-        <td>${escapeHtml(user.appRole)}</td>
-        <td>${escapeHtml(user.roles)}</td>
-        <td>${boolCell(user.isSuperuser)}</td>
-        <td>${boolCell(user.canCreateDb)}</td>
-        <td>${boolCell(user.canCreateRole)}</td>
-        <td>${escapeHtml(syncedAt)}</td>
-      </tr>`,
-    )
-    .join("");
-}
-
-function renderUsersShell(ctx: ComponentCtx): string {
-  const page = renderUsersPage(
-    ctx,
-    [],
-    "",
-    "",
-  ).replace(
-    `<tbody id="users-body"><tr><td colspan="7" class="muted">No application users found.</td></tr></tbody>`,
-    `<tbody id="users-body"><tr><td colspan="7" class="muted">Loading users…</td></tr></tbody>`,
-  );
-
-  const script = `
-<script>
-(async () => {
-  const base = (() => {
-    const path = window.location.pathname;
-    const idx = path.indexOf("/iframe");
-    if (idx >= 0) return path.slice(0, idx + "/iframe".length).replace(/\\/$/, "");
-    return path.replace(/\\/$/, "");
-  })();
-  const alertEl = document.getElementById("alert");
-  const bodyEl = document.getElementById("users-body");
-  try {
-    const res = await fetch(base + "/api/users" + window.location.search, { headers: { accept: "application/json" } });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || ("HTTP " + res.status));
-    if (alertEl) alertEl.hidden = true;
-    const users = data.users || [];
-    const syncedAt = data.syncedAt || "";
-    if (users.length === 0) {
-      bodyEl.innerHTML = '<tr><td colspan="7" class="muted">No application users found.</td></tr>';
-      return;
-    }
-    bodyEl.innerHTML = users.map((user) => \`
-      <tr>
-        <td>\${user.username}</td>
-        <td>\${user.appRole}</td>
-        <td>\${user.roles}</td>
-        <td>\${user.isSuperuser ? "yes" : "no"}</td>
-        <td>\${user.canCreateDb ? "yes" : "no"}</td>
-        <td>\${user.canCreateRole ? "yes" : "no"}</td>
-        <td>\${syncedAt}</td>
-      </tr>\`).join("");
-  } catch (err) {
-    if (alertEl) {
-      alertEl.hidden = false;
-      alertEl.textContent = err.message || String(err);
-    }
-    bodyEl.innerHTML = '<tr><td colspan="7" class="muted">Failed to load users.</td></tr>';
-  }
-})();
-</script>`;
-
-  return page.replace("</body>", `${script}</body>`);
-}
-
-function handleUsersPage(
-  url: URL,
-  req: IncomingMessage,
-  rawPathname: string,
-  res: ServerResponse,
-): void {
-  const ctx = parseComponentCtx(url, req, rawPathname);
-  if (!ctx) {
-    send(
-      res,
-      400,
-      renderUsersPage(
-        { org: "?", project: "?", env: "?", component: "?" },
-        [],
-        "",
-        "Missing component context in the iframe URL.",
-      ),
-      "text/html; charset=utf-8",
-    );
-    return;
-  }
-
-  // Respond immediately so Cycloid API → Plugin Manager iframe proxy does not time out.
-  send(res, 200, renderUsersShell(ctx), "text/html; charset=utf-8");
-}
-
-async function handleUsersApi(
-  url: URL,
-  req: IncomingMessage,
-  rawPathname: string,
-  res: ServerResponse,
-): Promise<void> {
-  const ctx = parseComponentCtx(url, req, rawPathname);
-  if (!ctx) {
-    send(res, 400, { error: "Missing component context." });
-    return;
-  }
-
-  try {
-    const { users, syncedAt } = await syncComponentUsers(ctx);
-    send(res, 200, { users, syncedAt });
-  } catch (err) {
-    send(res, 500, { error: (err as Error).message });
-  }
-}
-
-async function readBody(req: IncomingMessage): Promise<string> {
-  const chunks: Buffer[] = [];
-  for await (const chunk of req) {
-    chunks.push(chunk as Buffer);
-  }
-  return Buffer.concat(chunks).toString("utf8");
-}
-
-function unwrapOutputValue(raw: unknown): unknown {
-  if (raw === null || raw === undefined) return raw;
-  if (typeof raw === "string") {
-    const trimmed = raw.trim();
-    if (
-      (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
-      (trimmed.startsWith("'") && trimmed.endsWith("'"))
-    ) {
-      return trimmed.slice(1, -1);
-    }
-    return raw;
-  }
-  return raw;
-}
-
-function parsePostgresConnectionString(value: string): Partial<DbConfig> | null {
+function parseDatabaseUrl(value: string): DbConfig | null {
   try {
     const normalized = value.replace(/^postgres:\/\//, "postgresql://");
     const url = new URL(normalized);
+    const host = url.hostname;
+    const username = decodeURIComponent(url.username);
+    const password = decodeURIComponent(url.password);
+    if (!host || !username || !password) return null;
+
     return {
-      host: url.hostname,
-      port: url.port || DB_PORT,
-      username: decodeURIComponent(url.username),
-      password: decodeURIComponent(url.password),
+      host,
+      port: url.port || "5432",
+      username,
+      password,
       database: url.pathname.replace(/^\//, "") || "postgres",
+      ssl:
+        host.includes(".rds.amazonaws.com") || host.includes(".postgres.database.azure.com"),
     };
   } catch {
     const legacy =
       /^postgres(?:ql)?:\/\/([^:]+):([^@]+)@([^:/]+)(?::(\d+))?\/([^?]+)/.exec(value);
     if (!legacy) return null;
+    const host = legacy[3];
     return {
       username: decodeURIComponent(legacy[1]),
       password: decodeURIComponent(legacy[2]),
-      host: legacy[3],
-      port: legacy[4] || DB_PORT,
+      host,
+      port: legacy[4] || "5432",
       database: legacy[5] || "postgres",
+      ssl: host.includes(".rds.amazonaws.com") || host.includes(".postgres.database.azure.com"),
     };
   }
 }
 
-function firstString(outputs: Map<string, unknown>, keys: string[]): string {
-  for (const key of keys) {
-    const value = unwrapOutputValue(outputs.get(key));
-    if (typeof value === "string" && value.trim()) return value.trim();
-  }
-  return "";
-}
-
-function resolveDbConfig(outputs: Map<string, unknown>): DbConfig | null {
-  const connectionString = firstString(outputs, ["connection_string"]);
-  if (connectionString) {
-    const parsed = parsePostgresConnectionString(connectionString);
-    if (parsed?.host && parsed.username && parsed.password) {
-      return {
-        host: parsed.host,
-        port: parsed.port || DB_PORT,
-        username: parsed.username,
-        password: parsed.password,
-        database: parsed.database || "postgres",
-        ssl:
-          parsed.host.includes(".rds.amazonaws.com") ||
-          parsed.host.includes(".postgres.database.azure.com"),
-      };
-    }
-  }
-
-  const host = firstString(outputs, [
-    "rds_address",
-    "postgresql_server_fqdn",
-    "public_ip_address",
-    "private_ip_address",
-  ]);
-  const username = firstString(outputs, ["rds_username", "database_user", "administrator_login"]);
-  const password = firstString(outputs, ["rds_password", "database_password"]);
-  const database = firstString(outputs, ["database_name"]) || "postgres";
-
-  if (!host || !username || !password) return null;
-
-  let resolvedHost = host;
-  let resolvedPort = DB_PORT;
-  if (host.includes(":")) {
-    const [h, p] = host.split(":");
-    resolvedHost = h;
-    if (p) resolvedPort = p;
-  }
-
-  return {
-    host: resolvedHost,
-    port: resolvedPort,
-    username,
-    password,
-    database,
-    ssl:
-      resolvedHost.includes(".rds.amazonaws.com") ||
-      resolvedHost.includes(".postgres.database.azure.com"),
-  };
-}
-
-function cycloidApiError(): string {
-  return [
-    "Cannot reach the Cycloid API to read Terraform outputs.",
-    "Set cy_api_url (e.g. https://api.us.cycloid.io) and cy_api_key at plugin install time.",
-    "Direct API access is required for iframe widgets: calling PROXY_URL while handling",
-    "an iframe request can deadlock the Plugin Manager (API → PM → plugin → PM → API).",
-  ].join("\n");
-}
-
-const CY_HTTP_TIMEOUT_MS = 15_000;
-
-function httpGet(
-  target: URL,
-  headers: Record<string, string>,
-): Promise<{ status: number; body: string }> {
-  return new Promise((resolve, reject) => {
-    const isHttps = target.protocol === "https:";
-    const request = isHttps ? httpsRequest : httpRequest;
-    const req = request(
-      {
-        hostname: target.hostname,
-        port: target.port || (isHttps ? 443 : 80),
-        path: `${target.pathname}${target.search}`,
-        method: "GET",
-        headers: { accept: "application/json", ...headers },
-        timeout: CY_HTTP_TIMEOUT_MS,
-      },
-      (res) => {
-        const chunks: Buffer[] = [];
-        res.on("data", (chunk: Buffer) => chunks.push(chunk));
-        res.on("end", () => {
-          resolve({
-            status: res.statusCode ?? 0,
-            body: Buffer.concat(chunks).toString("utf8"),
-          });
-        });
-      },
-    );
-    req.on("timeout", () => {
-      req.destroy();
-      reject(new Error(`HTTP timeout after ${CY_HTTP_TIMEOUT_MS}ms calling ${target.origin}`));
-    });
-    req.on("error", reject);
-    req.end();
-  });
-}
-
-async function cycloidGet(path: string): Promise<{ status: number; body: string }> {
-  const failures: string[] = [];
-
-  // Prefer direct API: iframe requests already go through Plugin Manager
-  // (API → PM → plugin). Calling PROXY_URL from the plugin re-enters PM and can deadlock.
-  if (CY_API_URL && CY_API_KEY) {
-    try {
-      const url = apiUrl(path, CY_API_URL, "cy_api_url");
-      return await httpGet(url, { authorization: `Bearer ${CY_API_KEY}` });
-    } catch (err) {
-      failures.push((err as Error).message);
-    }
-  }
-
-  if (PROXY_URL) {
-    try {
-      const url = apiUrl(path, PROXY_URL, "PROXY_URL");
-      if (PLUGIN_SECRET) {
-        url.searchParams.set("secret", PLUGIN_SECRET);
-      }
-      return await httpGet(url, {});
-    } catch (err) {
-      failures.push((err as Error).message);
-    }
-  }
-
-  if (failures.length > 0) {
-    throw new Error(failures.join(" "));
-  }
-
-  throw new Error(cycloidApiError());
-}
-
-function matchesComponent(output: InventoryOutput, ctx: ComponentCtx): boolean {
-  const project = output.project_canonical?.trim();
-  const env = output.environment_canonical?.trim();
-  const component = output.component_canonical?.trim();
-  if (project && project !== ctx.project) return false;
-  if (env && env !== ctx.env) return false;
-  if (component && component !== ctx.component) return false;
-  return Boolean(output.key);
-}
-
-async function fetchComponentOutputs(ctx: ComponentCtx): Promise<Map<string, unknown>> {
-  const filter = [
-    `project_canonical[eq]=${ctx.project}`,
-    `environment_canonical[eq]=${ctx.env}`,
-    `component_canonical[eq]=${ctx.component}`,
-  ].join("&");
-
-  const path = `/organizations/${encodeURIComponent(ctx.org)}/inventory/outputs?filters=${encodeURIComponent(filter)}&page_size=200`;
-  const res = await cycloidGet(path);
-  if (res.status < 200 || res.status >= 300) {
-    throw new Error(`inventory outputs HTTP ${res.status}: ${res.body.slice(0, 240)}`);
-  }
-
-  const parsed = JSON.parse(res.body) as { data?: InventoryOutput[] };
-  const map = new Map<string, unknown>();
-  for (const item of parsed.data ?? []) {
-    if (!item.key || !matchesComponent(item, ctx)) continue;
-    map.set(item.key, unwrapOutputValue(item.value));
-  }
-  return map;
-}
-
-async function resolveDbForComponent(ctx: ComponentCtx): Promise<DbConfig> {
-  const outputs = await fetchComponentOutputs(ctx);
-  const db = resolveDbConfig(outputs);
-  if (!db) {
-    const keys = [...outputs.keys()].sort().join(", ") || "(none)";
+function resolveDbConfig(): DbConfig {
+  if (!DATABASE_URL) {
     throw new Error(
-      `No PostgreSQL inventory outputs for this component. Found keys: ${keys}. Expected rds_address/rds_username/rds_password or connection_string.`,
+      "DATABASE_URL is not configured. Set database_url at plugin install time (postgresql://user:password@host:5432/database).",
+    );
+  }
+  const db = parseDatabaseUrl(DATABASE_URL);
+  if (!db) {
+    throw new Error(
+      "Invalid database_url. Expected postgresql://user:password@host:5432/database",
     );
   }
   return db;
@@ -668,116 +211,182 @@ async function listPostgresUsers(client: pg.Client, masterUser: string): Promise
     });
 }
 
-function upsertComponentId(ctx: ComponentCtx): number {
-  sqlite.prepare(`
-    INSERT INTO components (org, project, env, component)
-    VALUES (@org, @project, @env, @component)
-    ON CONFLICT(org, project, env, component) DO UPDATE SET org = excluded.org
-  `).run(ctx);
-
-  const row = sqlite
-    .prepare(
-      `SELECT id FROM components WHERE org = ? AND project = ? AND env = ? AND component = ?`,
-    )
-    .get(ctx.org, ctx.project, ctx.env, ctx.component) as { id: number };
-  return row.id;
-}
-
-function storeUsers(componentId: number, users: PgUserRow[]): void {
-  const syncedAt = new Date().toISOString();
-  const deleteStmt = sqlite.prepare(`DELETE FROM pg_users WHERE component_id = ?`);
-  const insertStmt = sqlite.prepare(`
-    INSERT INTO pg_users (
-      component_id, username, app_role, roles, is_superuser, can_create_db, can_create_role, synced_at
-    ) VALUES (
-      @componentId, @username, @appRole, @roles, @isSuperuser, @canCreateDb, @canCreateRole, @syncedAt
-    )
-  `);
-
-  const tx = sqlite.transaction(() => {
-    deleteStmt.run(componentId);
-    for (const user of users) {
-      insertStmt.run({
-        componentId,
-        username: user.username,
-        appRole: user.appRole,
-        roles: user.roles,
-        isSuperuser: user.isSuperuser ? 1 : 0,
-        canCreateDb: user.canCreateDb ? 1 : 0,
-        canCreateRole: user.canCreateRole ? 1 : 0,
-        syncedAt,
-      });
-    }
-  });
-  tx();
-}
-
-async function syncComponentUsers(
-  ctx: ComponentCtx,
-): Promise<{ count: number; syncedAt: string; users: PgUserRow[] }> {
-  const db = await resolveDbForComponent(ctx);
+async function fetchUsers(): Promise<{ users: PgUserRow[]; syncedAt: string }> {
+  const db = resolveDbConfig();
   const users = await withPgClient(db, (client) => listPostgresUsers(client, db.username));
-
-  const componentId = upsertComponentId(ctx);
-  storeUsers(componentId, users);
   const syncedAt = new Date().toISOString();
-  console.log(
-    `[INFO] synced ${users.length} users for ${ctx.org}/${ctx.project}/${ctx.env}/${ctx.component}`,
-  );
-  return { count: users.length, syncedAt, users };
+  console.log(`[INFO] listed ${users.length} users from ${db.host}:${db.port}/${db.database}`);
+  return { users, syncedAt };
 }
 
-async function resyncAllComponents(): Promise<{ components: number; users: number }> {
-  const rows = sqlite.prepare(`SELECT org, project, env, component FROM components`).all() as ComponentCtx[];
-  let users = 0;
-  for (const ctx of rows) {
-    const result = await syncComponentUsers(ctx);
-    users += result.count;
+function boolCell(value: boolean): string {
+  return value ? "yes" : "no";
+}
+
+function renderUserRows(users: PgUserRow[], syncedAt: string): string {
+  if (users.length === 0) {
+    return `<tr><td colspan="7" class="muted">No application users found.</td></tr>`;
   }
-  return { components: rows.length, users };
+  return users
+    .map(
+      (user) => `
+      <tr>
+        <td>${escapeHtml(user.username)}</td>
+        <td>${escapeHtml(user.appRole)}</td>
+        <td>${escapeHtml(user.roles)}</td>
+        <td>${boolCell(user.isSuperuser)}</td>
+        <td>${boolCell(user.canCreateDb)}</td>
+        <td>${boolCell(user.canCreateRole)}</td>
+        <td>${escapeHtml(syncedAt)}</td>
+      </tr>`,
+    )
+    .join("");
 }
 
-function clearPluginData(): void {
-  sqlite.exec(`DELETE FROM pg_users; DELETE FROM components;`);
+function renderUsersPage(users: PgUserRow[], syncedAt: string, error = ""): string {
+  const rows = renderUserRows(users, syncedAt);
+  const errorBlock = error
+    ? `<div id="alert" class="alert">${escapeHtml(error)}</div>`
+    : `<div id="alert" class="alert" hidden></div>`;
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>PostgreSQL users</title>
+  <style>
+    :root { color-scheme: light; font-family: system-ui, sans-serif; }
+    body { margin: 0; background: #f4f6fa; color: #1a2233; }
+    main { padding: 1rem 1.25rem 1.5rem; }
+    h1 { font-size: 1.1rem; margin: 0 0 0.25rem; }
+    .muted { color: #5c677f; font-size: 0.875rem; margin-bottom: 1rem; }
+    .alert { background: #ffebee; color: #b71c1c; padding: 0.75rem 1rem; border-radius: 8px; margin-bottom: 1rem; }
+    .alert[hidden] { display: none; }
+    .card { background: #fff; border: 1px solid #d8deea; border-radius: 10px; overflow: auto; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
+    th, td { border-bottom: 1px solid #e7ebf3; padding: 0.65rem 0.75rem; text-align: left; white-space: nowrap; }
+    th { background: #f8f9fc; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.04em; color: #5c677f; position: sticky; top: 0; }
+    tr:last-child td { border-bottom: 0; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>PostgreSQL users</h1>
+    <p class="muted">Read-only list of application login roles</p>
+    ${errorBlock}
+    <div class="card">
+      <table>
+        <thead>
+          <tr>
+            <th>Username</th>
+            <th>Application role</th>
+            <th>PostgreSQL roles</th>
+            <th>Superuser</th>
+            <th>Can create DB</th>
+            <th>Can create role</th>
+            <th>Last synced</th>
+          </tr>
+        </thead>
+        <tbody id="users-body">${rows}</tbody>
+      </table>
+    </div>
+  </main>
+</body>
+</html>`;
 }
 
-async function handleEvents(req: IncomingMessage, res: ServerResponse): Promise<void> {
+function iframeFetchHelper(): string {
+  return `
+function __pluginFetchUrl(subPath) {
+  const path = window.location.pathname;
+  const idx = path.indexOf("/iframe");
+  const base = (idx >= 0 ? path.slice(0, idx + "/iframe".length) : path).replace(/\\/$/, "");
+  const sub = subPath.startsWith("/") ? subPath : ("/" + subPath);
+  return base + sub;
+}
+function __pluginError(data, status) {
+  if (data && data.error) return data.error;
+  return "HTTP " + status;
+}
+async function __pluginFetch(subPath) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 20000);
   try {
-    const raw = await readBody(req);
-    if (raw) {
-      const event = JSON.parse(raw) as {
-        entity?: string;
-        organization?: { canonical?: string };
-        project?: { canonical?: string };
-        environment?: { canonical?: string };
-        component?: { canonical?: string };
-      };
-      if (
-        event.entity === "component" &&
-        event.organization?.canonical &&
-        event.project?.canonical &&
-        event.environment?.canonical &&
-        event.component?.canonical
-      ) {
-        await syncComponentUsers({
-          org: event.organization.canonical,
-          project: event.project.canonical,
-          env: event.environment.canonical,
-          component: event.component.canonical,
-        });
-      }
-    }
-    send(res, 200, { ok: true });
+    const res = await fetch(__pluginFetchUrl(subPath), {
+      headers: { accept: "application/json" },
+      signal: controller.signal,
+    });
+    const text = await res.text();
+    let data = null;
+    try { data = text ? JSON.parse(text) : null; } catch { throw new Error(text.slice(0, 240) || ("HTTP " + res.status)); }
+    if (!res.ok) throw new Error(__pluginError(data, res.status));
+    return data;
   } catch (err) {
-    console.error(`[ERROR] event handler: ${(err as Error).message}`);
-    send(res, 200, { ok: true, warning: (err as Error).message });
+    if (err.name === "AbortError") throw new Error("Request timed out after 20s. Check database_url and network access to PostgreSQL.");
+    throw err;
+  } finally {
+    clearTimeout(timeout);
+  }
+}`;
+}
+
+function renderUsersShell(): string {
+  const page = renderUsersPage([], "", "").replace(
+    `<tbody id="users-body"><tr><td colspan="7" class="muted">No application users found.</td></tr></tbody>`,
+    `<tbody id="users-body"><tr><td colspan="7" class="muted">Loading users…</td></tr></tbody>`,
+  );
+
+  const script = `
+${iframeFetchHelper()}
+(async () => {
+  const alertEl = document.getElementById("alert");
+  const bodyEl = document.getElementById("users-body");
+  try {
+    const data = await __pluginFetch("/api/users");
+    if (alertEl) alertEl.hidden = true;
+    const users = data.users || [];
+    const syncedAt = data.syncedAt || "";
+    if (users.length === 0) {
+      bodyEl.innerHTML = '<tr><td colspan="7" class="muted">No application users found.</td></tr>';
+      return;
+    }
+    bodyEl.innerHTML = users.map((user) => \`
+      <tr>
+        <td>\${user.username}</td>
+        <td>\${user.appRole}</td>
+        <td>\${user.roles}</td>
+        <td>\${user.isSuperuser ? "yes" : "no"}</td>
+        <td>\${user.canCreateDb ? "yes" : "no"}</td>
+        <td>\${user.canCreateRole ? "yes" : "no"}</td>
+        <td>\${syncedAt}</td>
+      </tr>\`).join("");
+  } catch (err) {
+    if (alertEl) {
+      alertEl.hidden = false;
+      alertEl.textContent = err.message || String(err);
+    }
+    bodyEl.innerHTML = '<tr><td colspan="7" class="muted">Failed to load users.</td></tr>';
+  }
+})();
+</script>`;
+
+  return page.replace("</body>", `<script>${script}</script></body>`);
+}
+
+async function handleUsersApi(res: ServerResponse): Promise<void> {
+  try {
+    const { users, syncedAt } = await fetchUsers();
+    send(res, 200, { users, syncedAt });
+  } catch (err) {
+    send(res, 500, { error: (err as Error).message });
   }
 }
 
 async function handleResync(res: ServerResponse): Promise<void> {
   try {
-    const result = await resyncAllComponents();
-    send(res, 200, { started: true, ...result });
+    const { users } = await fetchUsers();
+    send(res, 200, { started: true, users: users.length });
   } catch (err) {
     send(res, 500, { started: false, error: (err as Error).message });
   }
@@ -787,8 +396,7 @@ const server = createServer((req, res) => {
   const start = Date.now();
   const method = req.method ?? "GET";
   const url = parseRequestUrl(req);
-  const rawPathname = url.pathname;
-  const pathname = normalizePluginPath(rawPathname);
+  const pathname = resolvePathname(url, url.pathname);
 
   res.on("finish", () => {
     const ms = Date.now() - start;
@@ -797,34 +405,21 @@ const server = createServer((req, res) => {
   });
 
   if (method === "GET" && pathname === "/_cy/ping") return send(res, 200, { ok: true });
-
-  if (method === "POST" && pathname === "/_cy/events") {
-    handleEvents(req, res).catch((err) => send(res, 500, { error: (err as Error).message }));
-    return;
-  }
-
-  if (method === "DELETE" && pathname === "/_cy/plugin") {
-    clearPluginData();
-    return send(res, 200, { ok: true });
-  }
+  if (method === "POST" && pathname === "/_cy/events") return send(res, 200, { ok: true });
+  if (method === "DELETE" && pathname === "/_cy/plugin") return send(res, 200, { ok: true });
 
   if (method === "POST" && pathname === "/_cy/resync") {
     handleResync(res).catch((err) => send(res, 500, { error: (err as Error).message }));
     return;
   }
 
-  if (
-    method === "GET" &&
-    (pathname === "/" || pathname === "/index.html" || pathname === "/ui/users")
-  ) {
-    handleUsersPage(url, req, rawPathname, res);
+  if (method === "GET" && (pathname === "/" || pathname === "/index.html" || pathname === "/ui/users")) {
+    send(res, 200, renderUsersShell(), "text/html; charset=utf-8");
     return;
   }
 
   if (method === "GET" && pathname === "/api/users") {
-    handleUsersApi(url, req, rawPathname, res).catch((err) => {
-      send(res, 500, { error: (err as Error).message });
-    });
+    handleUsersApi(res).catch((err) => send(res, 500, { error: (err as Error).message }));
     return;
   }
 

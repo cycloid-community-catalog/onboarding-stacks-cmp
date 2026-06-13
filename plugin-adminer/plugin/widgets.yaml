@@ -1,9 +1,7 @@
-# Component tab: Cycloid substitutes ($ .org $), ($ .project $), ($ .env $),
-# ($ .component $) when loading the iframe for the current component.
 - type: iframe
   placement:
     type: component
     config:
       tab_name: Adminer
   widget:
-    query: "/?org=($ .org $)&project=($ .project $)&env=($ .env $)&component=($ .component $)"
+    query: "/"

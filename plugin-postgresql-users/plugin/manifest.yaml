@@ -1,30 +1,10 @@
-description: "Read-only iframe table listing PostgreSQL database users for stack-postgresql components."
+description: "Read-only iframe table listing PostgreSQL database users."
 icon: "https://cycloid-demo-stacks-logo.s3.eu-west-1.amazonaws.com/postgresql.svg"
 
-scope:
-  - organization:project:*
-  - organization:inventory-output:*
-
 configuration:
-  - name: "Database port"
-    description: "Default PostgreSQL port when the Terraform output does not include one."
-    key: db_port
-    widget: simple_text
-    type: string
-    default: "5432"
-    required: true
-
-  - name: "Cycloid API URL"
-    description: "Cycloid API base URL. Required for iframe widgets (e.g. https://api.us.cycloid.io)."
-    key: cy_api_url
-    widget: simple_text
-    type: string
-    default: "https://api.us.cycloid.io"
-    required: true
-
-  - name: "Cycloid API key"
-    description: "Org API key with inventory output read access. Required for iframe widgets to avoid Plugin Manager deadlocks."
-    key: cy_api_key
+  - name: "Database URL"
+    description: "PostgreSQL connection URL (postgresql://user:password@host:5432/database)."
+    key: database_url
     widget: simple_text
     type: string
     required: true
