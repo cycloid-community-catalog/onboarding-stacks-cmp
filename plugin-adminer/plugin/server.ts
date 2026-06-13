@@ -72,10 +72,14 @@ function pruneAdminerSessions(): void {
   }
 }
 
+function isAdminerCookie(name: string): boolean {
+  return name === "adminer_sid" || name === "adminer_key" || name.startsWith("adminer_");
+}
+
 function mergeAdminerCookies(existing: string | undefined, stored: string): string {
   const merged = parseCookieHeader(existing);
   for (const [name, value] of parseCookieHeader(stored)) {
-    if (name === "adminer_sid" || name === "adminer_key") merged.set(name, value);
+    if (isAdminerCookie(name)) merged.set(name, value);
   }
   return buildCookieHeader(merged);
 }
@@ -107,7 +111,8 @@ function saveAdminerSessionFromCookies(key: string, setCookies: string[]): void 
     const match = /^([^=]+)=([^;]*)/.exec(raw.trim());
     if (!match) continue;
     const name = match[1].trim();
-    if (name === "adminer_sid" || name === "adminer_key") incoming.set(name, match[2].trim());
+    if (!isAdminerCookie(name)) continue;
+    incoming.set(name, match[2].trim());
   }
   if (!incoming.has("adminer_sid") && !incoming.has("adminer_key")) return;
 
@@ -122,13 +127,9 @@ function saveAdminerSessionFromCookies(key: string, setCookies: string[]): void 
 function rememberOutgoingAdminerCookies(key: string, cookieHeader: string | undefined): void {
   if (!key || !cookieHeader) return;
   const pairs = parseCookieHeader(cookieHeader);
-  const adminer = new Map<string, string>();
-  for (const name of ["adminer_sid", "adminer_key"] as const) {
-    const value = pairs.get(name);
-    if (value) adminer.set(name, value);
-  }
-  if (adminer.size === 0) return;
-  saveAdminerSessionFromCookies(key, [...adminer.entries()].map(([name, value]) => `${name}=${value}`));
+  const adminer = [...pairs.entries()].filter(([name]) => isAdminerCookie(name));
+  if (adminer.length === 0) return;
+  saveAdminerSessionFromCookies(key, adminer.map(([name, value]) => `${name}=${value}`));
 }
 
 function collectSetCookies(headers: IncomingHttpHeaders): string[] {
@@ -151,15 +152,24 @@ function resolveSessionKey(
   return key;
 }
 
-function appendSessionKeyToPath(pathAndQuery: string, sessionKey: string): string {
-  if (!sessionKey || pathAndQuery.includes("_cy_sk=")) return pathAndQuery;
+function requestOrigin(req: IncomingMessage): string {
+  const proto = String(req.headers["x-forwarded-proto"] ?? "https").split(",")[0].trim() || "https";
+  const host = String(req.headers["x-forwarded-host"] ?? req.headers.host ?? "localhost").split(",")[0].trim();
+  return `${proto}://${host}`;
+}
+
+function appendSessionKeyToPath(pathAndQuery: string, sessionKey: string, origin?: string): string {
+  if (!sessionKey || pathAndQuery.includes("_cy_sk=")) {
+    return origin && pathAndQuery.startsWith("/") ? `${origin}${pathAndQuery}` : pathAndQuery;
+  }
   const q = pathAndQuery.indexOf("?");
   const path = q >= 0 ? pathAndQuery.slice(0, q) : pathAndQuery;
   const query = q >= 0 ? pathAndQuery.slice(q + 1) : "";
   const params = new URLSearchParams(query);
   params.set("_cy_sk", sessionKey);
   const qs = params.toString();
-  return qs ? `${path}?${qs}` : path;
+  const result = qs ? `${path}?${qs}` : path;
+  return origin && path.startsWith("/") ? `${origin}${result}` : result;
 }
 
 function hasAdminerCookie(header: string | undefined): boolean {
@@ -289,17 +299,33 @@ function getPublicBase(req: IncomingMessage, url: URL): { href: string; path: st
   return { href: "", path: "" };
 }
 
-function rewriteLocation(location: string, publicBasePath: string, sessionKey: string): string {
+/** Rewrite Adminer redirect targets so the browser stays on the Cycloid proxy path with _cy_sk. */
+function rewriteLocation(
+  location: string,
+  publicBasePath: string,
+  sessionKey: string,
+  origin: string,
+): string {
   if (!publicBasePath) return location;
 
-  let pathAndQuery = location;
-  if (/^https?:\/\//i.test(location)) {
+  const trimmed = location.trim();
+  if (!trimmed) return appendSessionKeyToPath(publicBasePath, sessionKey, origin);
+
+  let pathAndQuery = trimmed;
+  let hash = "";
+  const hashIdx = pathAndQuery.indexOf("#");
+  if (hashIdx >= 0) {
+    hash = pathAndQuery.slice(hashIdx);
+    pathAndQuery = pathAndQuery.slice(0, hashIdx);
+  }
+
+  if (/^https?:\/\//i.test(pathAndQuery)) {
     try {
-      const parsed = new URL(location);
+      const parsed = new URL(pathAndQuery);
       if (parsed.hostname === "127.0.0.1" || parsed.hostname === "localhost") {
         pathAndQuery = `${parsed.pathname}${parsed.search}`;
       } else if (iframeBaseFromPathname(parsed.pathname)) {
-        return location;
+        return appendSessionKeyToPath(`${parsed.pathname}${parsed.search}`, sessionKey, origin) + hash;
       } else {
         pathAndQuery = `${parsed.pathname}${parsed.search}`;
       }
@@ -309,12 +335,38 @@ function rewriteLocation(location: string, publicBasePath: string, sessionKey: s
   }
 
   if (pathAndQuery.startsWith(publicBasePath)) {
-    return appendSessionKeyToPath(pathAndQuery, sessionKey);
+    return appendSessionKeyToPath(pathAndQuery, sessionKey, origin) + hash;
   }
+
+  if (pathAndQuery.startsWith("?")) {
+    return appendSessionKeyToPath(`${publicBasePath}${pathAndQuery}`, sessionKey, origin) + hash;
+  }
+
+  if (pathAndQuery.startsWith("./")) {
+    pathAndQuery = pathAndQuery.slice(2);
+  } else if (pathAndQuery === ".") {
+    pathAndQuery = "";
+  }
+
   if (pathAndQuery.startsWith("/")) {
-    return appendSessionKeyToPath(`${publicBasePath}${pathAndQuery}`, sessionKey);
+    const qIdx = pathAndQuery.indexOf("?");
+    const pathPart = qIdx >= 0 ? pathAndQuery.slice(0, qIdx) : pathAndQuery;
+    const query = qIdx >= 0 ? pathAndQuery.slice(qIdx) : "";
+    let mapped = publicBasePath;
+    if (pathPart !== "/" && pathPart !== "") {
+      if (pathPart === ADMINER_MOUNT || pathPart === `${ADMINER_MOUNT}/`) {
+        mapped = publicBasePath;
+      } else if (pathPart.startsWith(`${ADMINER_MOUNT}/`)) {
+        mapped = `${publicBasePath}${pathPart.slice(ADMINER_MOUNT.length)}`;
+      } else {
+        mapped = `${publicBasePath}${pathPart}`;
+      }
+    }
+    return appendSessionKeyToPath(`${mapped}${query}`, sessionKey, origin) + hash;
   }
-  return appendSessionKeyToPath(`${publicBasePath}/${pathAndQuery}`, sessionKey);
+
+  const mapped = pathAndQuery ? `${publicBasePath}/${pathAndQuery}`.replace(/\/\/+/g, "/") : publicBasePath;
+  return appendSessionKeyToPath(mapped, sessionKey, origin) + hash;
 }
 
 function rewriteSetCookie(cookie: string, _publicBasePath: string): string {
@@ -333,18 +385,25 @@ function rewriteSetCookie(cookie: string, _publicBasePath: string): string {
   return out;
 }
 
+function buildCyAdminerBaseCookie(publicBasePath: string): string {
+  return `cy_adminer_base=${encodeURIComponent(publicBasePath)}; Path=/; SameSite=None; Secure; HttpOnly`;
+}
+
 function filterProxyResponseHeaders(
   headers: IncomingHttpHeaders,
   publicBasePath: string,
   sessionKey: string,
+  origin: string,
 ): Record<string, string | string[]> {
   const out: Record<string, string | string[]> = {};
+  let rewrittenLocation = "";
   for (const [key, value] of Object.entries(headers)) {
     if (value === undefined) continue;
     const lower = key.toLowerCase();
     if (HOP_BY_HOP_HEADERS.has(lower) || STRIPPED_RESPONSE_HEADERS.has(lower)) continue;
     if (lower === "location" && typeof value === "string") {
-      out[key] = rewriteLocation(value, publicBasePath, sessionKey);
+      rewrittenLocation = rewriteLocation(value, publicBasePath, sessionKey, origin);
+      out[key] = rewrittenLocation;
       continue;
     }
     if (lower === "set-cookie") {
@@ -353,6 +412,18 @@ function filterProxyResponseHeaders(
       continue;
     }
     out[key] = value;
+  }
+
+  if (publicBasePath) {
+    const existing = out["set-cookie"];
+    const baseCookie = buildCyAdminerBaseCookie(publicBasePath);
+    out["set-cookie"] = existing
+      ? [...(Array.isArray(existing) ? existing : [existing]), baseCookie]
+      : baseCookie;
+  }
+
+  if (rewrittenLocation) {
+    out["x-cy-adminer-redirect"] = rewrittenLocation;
   }
   return out;
 }
@@ -462,7 +533,13 @@ function proxyAdminer(
 
       const contentType = String(upstreamRes.headers["content-type"] ?? "");
       const isHtml = contentType.includes("text/html");
-      const responseHeaders = filterProxyResponseHeaders(upstreamRes.headers, publicBase.path, sessionKey);
+      const origin = requestOrigin(req);
+      const responseHeaders = filterProxyResponseHeaders(
+        upstreamRes.headers,
+        publicBase.path,
+        sessionKey,
+        origin,
+      );
       responseHeaders["x-cy-adminer-debug"] =
         `key=${sessionKey || "-"} bridged=${bridged} stored=${sessionKey ? adminerSessions.has(sessionKey) : false}`;
 
