@@ -9,7 +9,6 @@ if (!Number.isFinite(port) || port <= 0) {
 
 const ADMINER_PORT = process.env.ADMINER_PORT?.trim() || "8081";
 
-// Adminer sets X-Frame-Options: deny — must strip so Cycloid can embed the UI in an iframe.
 const STRIPPED_RESPONSE_HEADERS = new Set([
   "x-frame-options",
   "content-security-policy",
@@ -62,26 +61,25 @@ function iframeBaseFromPathname(pathname: string): string {
   return pathname.slice(0, iframeIdx + "/iframe".length);
 }
 
-/** Public URL prefix for the Cycloid iframe (e.g. https://api…/organizations/…/iframe/). */
-function getPublicBaseHref(req: IncomingMessage, url: URL): string {
+function getPublicBase(req: IncomingMessage, url: URL): { href: string; path: string } {
   const referer = req.headers.referer ?? req.headers.referrer;
   if (typeof referer === "string" && referer) {
     try {
       const ref = new URL(referer);
-      const basePath = iframeBaseFromPathname(ref.pathname);
-      if (basePath) return `${ref.origin}${basePath}/`;
+      const path = iframeBaseFromPathname(ref.pathname);
+      if (path) return { href: `${ref.origin}${path}/`, path };
     } catch {
       /* ignore malformed referer */
     }
   }
 
-  const basePath = iframeBaseFromPathname(url.pathname);
-  if (basePath) return `${url.origin}${basePath}/`;
-  return "";
+  const path = iframeBaseFromPathname(url.pathname);
+  if (path) return { href: `${url.origin}${path}/`, path };
+  return { href: "", path: "" };
 }
 
-function rewriteLocation(location: string, publicBaseHref: string): string {
-  if (!publicBaseHref) return location;
+function rewriteLocation(location: string, publicBasePath: string): string {
+  if (!publicBasePath) return location;
 
   let pathAndQuery = location;
   if (/^https?:\/\//i.test(location)) {
@@ -90,8 +88,7 @@ function rewriteLocation(location: string, publicBaseHref: string): string {
       if (parsed.hostname === "127.0.0.1" || parsed.hostname === "localhost") {
         pathAndQuery = `${parsed.pathname}${parsed.search}`;
       } else {
-        const basePath = iframeBaseFromPathname(parsed.pathname);
-        if (basePath) return location;
+        if (iframeBaseFromPathname(parsed.pathname)) return location;
         pathAndQuery = `${parsed.pathname}${parsed.search}`;
       }
     } catch {
@@ -99,18 +96,33 @@ function rewriteLocation(location: string, publicBaseHref: string): string {
     }
   }
 
-  const publicBasePath = new URL(publicBaseHref).pathname.replace(/\/$/, "");
   if (pathAndQuery.startsWith(publicBasePath)) return pathAndQuery;
-
-  if (pathAndQuery.startsWith("/")) {
-    return `${publicBasePath}${pathAndQuery}`;
-  }
+  if (pathAndQuery.startsWith("/")) return `${publicBasePath}${pathAndQuery}`;
   return `${publicBasePath}/${pathAndQuery}`;
+}
+
+function rewriteSetCookie(cookie: string, cookiePath: string): string {
+  let out = cookie;
+  if (cookiePath) {
+    const pathValue = `${cookiePath}/`;
+    if (/;\s*path=/i.test(out)) {
+      out = out.replace(/;\s*path=[^;]*/i, `; Path=${pathValue}`);
+    } else {
+      out += `; Path=${pathValue}`;
+    }
+  }
+  if (!/;\s*samesite=/i.test(out)) {
+    out += "; SameSite=None; Secure";
+  } else {
+    out = out.replace(/;\s*samesite=[^;]*/i, "; SameSite=None");
+    if (!/;\s*secure(?:;|$)/i.test(out)) out += "; Secure";
+  }
+  return out;
 }
 
 function filterProxyResponseHeaders(
   headers: IncomingHttpHeaders,
-  publicBaseHref: string,
+  publicBasePath: string,
 ): Record<string, string | string[]> {
   const out: Record<string, string | string[]> = {};
   for (const [key, value] of Object.entries(headers)) {
@@ -118,12 +130,26 @@ function filterProxyResponseHeaders(
     const lower = key.toLowerCase();
     if (HOP_BY_HOP_HEADERS.has(lower) || STRIPPED_RESPONSE_HEADERS.has(lower)) continue;
     if (lower === "location" && typeof value === "string") {
-      out[key] = rewriteLocation(value, publicBaseHref);
+      out[key] = rewriteLocation(value, publicBasePath);
+      continue;
+    }
+    if (lower === "set-cookie") {
+      const cookies = Array.isArray(value) ? value : [value];
+      out[key] = cookies.map((cookie) => rewriteSetCookie(String(cookie), publicBasePath));
       continue;
     }
     out[key] = value;
   }
   return out;
+}
+
+/** Root-relative URLs (href="/…") ignore <base>; rewrite them to stay under the iframe path. */
+function rewriteRootRelativeUrls(html: string, publicBasePath: string): string {
+  if (!publicBasePath || !html.includes("/")) return html;
+  return html.replace(
+    /(\s(?:action|href|src)\s*=\s*["'])\/(?!\/)/gi,
+    `$1${publicBasePath}/`,
+  );
 }
 
 function injectBaseHref(html: string, baseHref: string): string {
@@ -135,6 +161,11 @@ function injectBaseHref(html: string, baseHref: string): string {
     return html.replace(/<head(\s[^>]*)?>/i, (match) => `${match}${tag}`);
   }
   return `${tag}${html}`;
+}
+
+function rewriteHtml(html: string, publicBase: { href: string; path: string }): string {
+  if (!publicBase.path) return html;
+  return injectBaseHref(rewriteRootRelativeUrls(html, publicBase.path), publicBase.href);
 }
 
 function sendJson(res: ServerResponse, status: number, body: object): void {
@@ -150,7 +181,7 @@ function proxyAdminer(
   requestUrl: URL,
 ): void {
   const targetPath = `${pathname}${search}`;
-  const publicBaseHref = getPublicBaseHref(req, requestUrl);
+  const publicBase = getPublicBase(req, requestUrl);
 
   const headers: Record<string, string> = {};
   for (const [key, value] of Object.entries(req.headers)) {
@@ -158,6 +189,9 @@ function proxyAdminer(
     headers[key] = Array.isArray(value) ? value.join(", ") : value;
   }
   headers.host = `127.0.0.1:${ADMINER_PORT}`;
+  if (publicBase.path) {
+    headers["x-plugin-base-path"] = publicBase.path;
+  }
 
   const upstream = httpRequest(
     {
@@ -170,9 +204,9 @@ function proxyAdminer(
     (upstreamRes) => {
       const contentType = String(upstreamRes.headers["content-type"] ?? "");
       const isHtml = contentType.includes("text/html");
-      const responseHeaders = filterProxyResponseHeaders(upstreamRes.headers, publicBaseHref);
+      const responseHeaders = filterProxyResponseHeaders(upstreamRes.headers, publicBase.path);
 
-      if (!publicBaseHref || !isHtml) {
+      if (!publicBase.path || !isHtml) {
         delete responseHeaders["content-length"];
         res.writeHead(upstreamRes.statusCode ?? 502, responseHeaders);
         upstreamRes.pipe(res);
@@ -183,7 +217,7 @@ function proxyAdminer(
       upstreamRes.on("data", (chunk: Buffer) => chunks.push(chunk));
       upstreamRes.on("end", () => {
         const raw = Buffer.concat(chunks).toString("utf8");
-        const body = Buffer.from(injectBaseHref(raw, publicBaseHref), "utf8");
+        const body = Buffer.from(rewriteHtml(raw, publicBase), "utf8");
         responseHeaders["content-length"] = String(body.length);
         res.writeHead(upstreamRes.statusCode ?? 502, responseHeaders);
         res.end(body);

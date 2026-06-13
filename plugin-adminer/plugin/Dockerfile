@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-FROM node:22-trixie-slim
+FROM node:22-bookworm-slim
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends php-cli curl ca-certificates \
