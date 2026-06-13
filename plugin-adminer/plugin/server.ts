@@ -455,8 +455,48 @@ const HOP_BY_HOP_HEADERS = new Set([
   "upgrade",
 ]);
 
-/** Client fixes: rewrite forms/links; bootstrap _cy_sk from iframe pathname when the proxy strips context. */
-const IFRAME_CLIENT_SCRIPT = `<script>(function(){function stablePath(p){p=p.replace(/\\/adminer\\/?$/,"").replace(/\\/+$/,"");p=p.replace(/(\\/plugin_widgets\\/\\d+)\\/[^/]+(?=\\/iframe)/,"$1");return p.replace(/\\/plugin_widgets\\/\\d+\\/iframe/,"/iframe")}function canonicalKey(){var p=location.pathname;if(p.indexOf("/iframe")<0)return"";return stablePath(p)}function iframePrefix(){var p=location.pathname;if(p.indexOf("/iframe")<0)return"";return p.replace(/\\/adminer\\/?$/,"").replace(/\\/+$/,"")}function urlSk(){try{return new URL(location.href).searchParams.get("_cy_sk")||""}catch(e){return""}}function baseDir(){var k=iframePrefix();return k?location.origin+k+"/":null}function fixUrl(u){var b=baseDir();if(!b||!u)return u;if(/^https?:\\/\\//i.test(u)||u.indexOf("//")===0)return u;if(u.charAt(0)==="/")return b.replace(/\\/$/,"")+u;if(u.charAt(0)==="?")return b.replace(/\\/?$/,"/")+u;return u}function withSk(u){var k=urlSk();if(!k||!u)return u;try{var n=new URL(u,location.href);if(n.origin!==location.origin)return u;if(!n.searchParams.has("_cy_sk"))n.searchParams.set("_cy_sk",k);return n.pathname+n.search+n.hash}catch(e){return u}}var ck=canonicalKey();if(ck&&!location.search.includes("_cy_sk=")){try{var u=new URL(location.href);u.searchParams.set("_cy_sk",ck);location.replace(u.pathname+u.search+u.hash)}catch(e){}}var key=urlSk();var b=baseDir();if(b&&!document.querySelector("base")){var base=document.createElement("base");base.href=b;(document.head||document.documentElement).prepend(base)}function patch(){document.querySelectorAll("a[href]").forEach(function(el){var h=el.getAttribute("href");if(h&&h.charAt(0)==="/")el.setAttribute("href",withSk(fixUrl(h)))});document.querySelectorAll('form[action^="/"],form:not([action])').forEach(function(el){var a=el.getAttribute("action");if(a&&a.charAt(0)==="/")el.setAttribute("action",withSk(fixUrl(a)))})}patch();new MutationObserver(patch).observe(document.documentElement,{childList:true,subtree:true});document.addEventListener("submit",function(e){var f=e.target;if(!f||f.nodeName!=="FORM")return;var act=f.getAttribute("action");if(!act||act==="/")f.action=withSk(fixUrl(act||"/"));var sk=key||ck;if(sk&&!f.querySelector('input[name="_cy_sk"]')){var i=document.createElement("input");i.type="hidden";i.name="_cy_sk";i.value=sk;f.appendChild(i)}},true);var of=window.fetch;window.fetch=function(input,init){try{var url=typeof input==="string"?input:input.url;if(url&&url.indexOf("adminer.org")>=0)return Promise.resolve(new Response("{}",{status:200,headers:{"content-type":"application/json"}}))}catch(e){}return of.apply(this,arguments)}})();</script>`;
+/** Client fixes: rewrite forms/links; add _cy_sk to URL via replaceState (never full reload). */
+const IFRAME_CLIENT_SCRIPT = `<script>(function(){
+function stablePath(p){p=p.replace(/\\/adminer\\/?$/,"").replace(/\\/+$/,"");p=p.replace(/(\\/plugin_widgets\\/\\d+)\\/[^/]+(?=\\/iframe)/,"$1");return p.replace(/\\/plugin_widgets\\/\\d+\\/iframe/,"/iframe")}
+function canonicalKey(){var p=location.pathname;return p.indexOf("/iframe")<0?"":stablePath(p)}
+function iframePrefix(){var p=location.pathname;return p.indexOf("/iframe")<0?"":p.replace(/\\/adminer\\/?$/,"").replace(/\\/+$/,"")}
+function urlSk(){try{return new URL(location.href).searchParams.get("_cy_sk")||""}catch(e){return""}}
+var ck=canonicalKey();
+function effectiveSk(){return urlSk()||ck}
+function setSkInUrl(sk){if(!sk)return;try{var u=new URL(location.href);if(u.searchParams.get("_cy_sk")===sk)return;u.searchParams.set("_cy_sk",sk);history.replaceState(null,"",u.pathname+u.search+u.hash)}catch(e){}}
+setSkInUrl(effectiveSk());
+function baseDir(){var k=iframePrefix();return k?location.origin+k+"/":null}
+function fixUrl(u){var b=baseDir();if(!b||!u)return u;if(/^https?:\\/\\//i.test(u)||u.indexOf("//")===0)return u;if(u.charAt(0)==="/")return b.replace(/\\/$/,"")+u;if(u.charAt(0)==="?")return b.replace(/\\/?$/,"/")+u;return u}
+function withSk(u){var k=effectiveSk();if(!k||!u)return u;try{var n=new URL(u,location.href);if(n.origin!==location.origin)return u;n.searchParams.set("_cy_sk",k);return n.pathname+n.search+n.hash}catch(e){return u}}
+var b=baseDir();
+if(b&&!document.querySelector("base")){var base=document.createElement("base");base.href=b;(document.head||document.documentElement).prepend(base)}
+function patch(){
+  document.querySelectorAll("a[href]").forEach(function(el){
+    var h=el.getAttribute("href");
+    if(!h)return;
+    if(h.charAt(0)==="/"||h.charAt(0)==="?")el.setAttribute("href",withSk(fixUrl(h)));
+  });
+  document.querySelectorAll('form[action^="/"],form:not([action])').forEach(function(el){
+    var a=el.getAttribute("action");
+    if(!a||a==="/")el.setAttribute("action",withSk(fixUrl(a||"/")));
+    else if(a.charAt(0)==="/")el.setAttribute("action",withSk(fixUrl(a)));
+    var sk=effectiveSk();
+    if(sk&&!el.querySelector('input[name="_cy_sk"]')){var i=document.createElement("input");i.type="hidden";i.name="_cy_sk";i.value=sk;el.appendChild(i)}
+  });
+}
+patch();
+new MutationObserver(patch).observe(document.documentElement,{childList:true,subtree:true});
+document.addEventListener("submit",function(e){
+  var f=e.target;if(!f||f.nodeName!=="FORM")return;
+  var act=f.getAttribute("action");
+  if(!act||act==="/")f.setAttribute("action",withSk(fixUrl(act||"/")));
+  else if(act.charAt(0)==="/")f.setAttribute("action",withSk(fixUrl(act)));
+  var sk=effectiveSk();
+  if(sk&&!f.querySelector('input[name="_cy_sk"]')){var i=document.createElement("input");i.type="hidden";i.name="_cy_sk";i.value=sk;f.appendChild(i)}
+},true);
+var of=window.fetch;
+window.fetch=function(input,init){try{var url=typeof input==="string"?input:input.url;if(url&&url.indexOf("adminer.org")>=0)return Promise.resolve(new Response("{}",{status:200,headers:{"content-type":"application/json"}}))}catch(e){}return of.apply(this,arguments)};
+})();</script>`;
 
 function parseRequestUrl(req: IncomingMessage): URL {
   const host = req.headers.host?.trim() || "localhost";
@@ -675,7 +715,12 @@ function rewriteRootRelativeUrls(html: string, publicBasePath: string): string {
   );
 }
 
-function injectIframeFixes(html: string, publicBase: { href: string; path: string }, sessionKey: string): string {
+function injectIframeFixes(
+  html: string,
+  publicBase: { href: string; path: string },
+  sessionKey: string,
+  requestMethod: string,
+): string {
   if (!html.includes("<")) return html;
 
   let out = stripExternalVersionCheck(html);
@@ -691,9 +736,11 @@ function injectIframeFixes(html: string, publicBase: { href: string; path: strin
   }
 
   const skParam = sessionKey ? publicSessionParam(sessionKey) : "";
-  const skScript = skParam
-    ? `<script>(function(){var s="${skParam}";try{var u=new URL(location.href);var k=u.searchParams.get("_cy_sk");if(k===s)return;if(!k||k.charAt(0)==="/"){u.searchParams.set("_cy_sk",s);location.replace(u.pathname+u.search+u.hash)}}catch(e){}})();</script>`
-    : "";
+  const isGet = requestMethod.toUpperCase() === "GET";
+  const skScript =
+    isGet && skParam
+      ? `<script>(function(){var s="${skParam}";try{var u=new URL(location.href);var k=u.searchParams.get("_cy_sk");if(k===s)return;if(!k||k.charAt(0)==="/"){u.searchParams.set("_cy_sk",s);history.replaceState(null,"",u.pathname+u.search+u.hash)}}catch(e){}})();</script>`
+      : "";
 
   const script = skScript + IFRAME_CLIENT_SCRIPT;
   if (/<head[\s>]/i.test(out)) {
@@ -723,6 +770,7 @@ type AdminerProxyContext = {
   origin: string;
   bridged: boolean;
   redirectCount: number;
+  requestMethod: string;
   seenRedirectPaths?: Set<string>;
 };
 
@@ -763,7 +811,10 @@ function respondAdminerUpstream(
   upstreamRes.on("data", (chunk: Buffer) => chunks.push(chunk));
   upstreamRes.on("end", () => {
     const raw = Buffer.concat(chunks).toString("utf8");
-    const body = Buffer.from(injectIframeFixes(raw, ctx.publicBase, ctx.sessionKey), "utf8");
+    const body = Buffer.from(
+      injectIframeFixes(raw, ctx.publicBase, ctx.sessionKey, ctx.requestMethod),
+      "utf8",
+    );
     responseHeaders["content-length"] = String(body.length);
     ctx.res.writeHead(statusCode, responseHeaders);
     ctx.res.end(body);
@@ -863,6 +914,7 @@ function proxyAdminer(
       origin: requestOrigin(req),
       bridged,
       redirectCount: 0,
+      requestMethod: req.method ?? "GET",
     },
     req.method ?? "GET",
     targetPath,
