@@ -18,10 +18,11 @@ const adminerSessions = new Map<string, { cookieHeader: string; updatedAt: numbe
 /** Short _cy_sk token → canonical widget iframe path (avoids multi-KB query strings). */
 const shortSessionKeys = new Map<string, string>();
 
-/** Strip /adminer suffix and the per-request JWT from .../plugin_widgets/{id}/{jwt}/iframe paths. */
+/** Strip /adminer suffix, JWT segment, and widget id — stable per component. */
 function stableWidgetPath(path: string): string {
   let p = path.replace(/\/adminer\/?$/i, "").replace(/\/+$/, "");
   p = p.replace(/(\/plugin_widgets\/\d+)\/[^/]+(?=\/iframe)/, "$1");
+  p = p.replace(/\/plugin_widgets\/\d+\/iframe/, "/iframe");
   return p;
 }
 
@@ -37,30 +38,59 @@ function isShortToken(key: string): boolean {
   return /^[0-9a-f]{16}$/i.test(key);
 }
 
+function widgetKeyFromQueryParams(req: IncomingMessage): string {
+  const url = parseRequestUrl(req);
+  const org = url.searchParams.get("org")?.trim();
+  const project = url.searchParams.get("project")?.trim();
+  const env = url.searchParams.get("env")?.trim();
+  const component = url.searchParams.get("component")?.trim();
+  if (!org || !project || !env || !component) return "";
+  return `/organizations/${org}/projects/${project}/environments/${env}/components/${component}/iframe`;
+}
+
+function extractIframePath(value: string): string {
+  const match = /(\/organizations\/[^\s?#]*\/iframe)/.exec(value);
+  if (match) return canonicalSessionKey(match[1]);
+  try {
+    const path = new URL(value, "http://local").pathname;
+    if (path.includes("/iframe")) return canonicalSessionKey(path);
+  } catch {
+    /* ignore malformed URL */
+  }
+  return "";
+}
+
 function widgetKeyFromRequest(req: IncomingMessage): string {
   const headerNames = [
     "x-forwarded-uri",
     "x-original-url",
     "x-forwarded-path",
     "x-cycloid-plugin-uri",
+    "x-request-uri",
+    "x-rewrite-url",
   ] as const;
   for (const name of headerNames) {
     const value = req.headers[name];
     if (typeof value !== "string") continue;
-    const match = /(\/organizations\/[^\s?]*\/iframe)/.exec(value);
-    if (match) return canonicalSessionKey(match[1]);
+    const key = extractIframePath(value);
+    if (key) return key;
   }
+
+  for (const value of Object.values(req.headers)) {
+    if (typeof value !== "string" || !value.includes("/organizations/")) continue;
+    const key = extractIframePath(value);
+    if (key) return key;
+  }
+
   const referer = req.headers.referer ?? req.headers.referrer;
-  if (typeof referer === "string") {
-    const match = /(\/organizations\/[^\s?]*\/iframe)/.exec(referer);
-    if (match) return canonicalSessionKey(match[1]);
-    try {
-      const path = new URL(referer).pathname;
-      if (path.includes("/iframe")) return canonicalSessionKey(path);
-    } catch {
-      /* ignore malformed referer */
-    }
+  if (typeof referer === "string" && referer) {
+    const key = extractIframePath(referer);
+    if (key) return key;
   }
+
+  const fromQuery = widgetKeyFromQueryParams(req);
+  if (fromQuery) return fromQuery;
+
   const base = parseCookieHeader(req.headers.cookie).get("cy_adminer_base");
   if (base) return canonicalSessionKey(decodeURIComponent(base));
   return "";
@@ -378,8 +408,8 @@ const HOP_BY_HOP_HEADERS = new Set([
   "upgrade",
 ]);
 
-/** Client fixes: rewrite forms/links; _cy_sk comes from URL (short token injected by server). */
-const IFRAME_CLIENT_SCRIPT = `<script>(function(){function urlSk(){try{return new URL(location.href).searchParams.get("_cy_sk")||""}catch(e){return""}}function sessionKey(){var p=location.pathname;if(p.indexOf("/iframe")<0)return"";return p.replace(/\\/adminer\\/?$/,"").replace(/\\/$/,"")}function baseDir(){var k=sessionKey();return k?location.origin+k+"/":null}function fixUrl(u){var b=baseDir();if(!b||!u)return u;if(/^https?:\\/\\//i.test(u)||u.indexOf("//")===0)return u;if(u.charAt(0)==="/")return b.replace(/\\/$/,"")+u;if(u.charAt(0)==="?")return b.replace(/\\/?$/,"/")+u;return u}function withSk(u){var k=urlSk();if(!k||!u)return u;try{var n=new URL(u,location.href);if(n.origin!==location.origin)return u;if(!n.searchParams.has("_cy_sk"))n.searchParams.set("_cy_sk",k);return n.pathname+n.search+n.hash}catch(e){return u}}var key=urlSk();var b=baseDir();if(b&&!document.querySelector("base")){var base=document.createElement("base");base.href=b;(document.head||document.documentElement).prepend(base)}function patch(){document.querySelectorAll("a[href]").forEach(function(el){var h=el.getAttribute("href");if(h&&h.charAt(0)==="/")el.setAttribute("href",withSk(fixUrl(h)))});document.querySelectorAll('form[action^="/"],form:not([action])').forEach(function(el){var a=el.getAttribute("action");if(a&&a.charAt(0)==="/")el.setAttribute("action",withSk(fixUrl(a)))})}patch();new MutationObserver(patch).observe(document.documentElement,{childList:true,subtree:true});document.addEventListener("submit",function(e){var f=e.target;if(!f||f.nodeName!=="FORM")return;var act=f.getAttribute("action");if(!act||act==="/")f.action=withSk(fixUrl(act||"/"));if(key&&!f.querySelector('input[name="_cy_sk"]')){var i=document.createElement("input");i.type="hidden";i.name="_cy_sk";i.value=key;f.appendChild(i)}},true);var of=window.fetch;window.fetch=function(input,init){try{var url=typeof input==="string"?input:input.url;if(url&&url.indexOf("adminer.org")>=0)return Promise.resolve(new Response("{}",{status:200,headers:{"content-type":"application/json"}}))}catch(e){}return of.apply(this,arguments)}})();</script>`;
+/** Client fixes: rewrite forms/links; bootstrap _cy_sk from iframe pathname when the proxy strips context. */
+const IFRAME_CLIENT_SCRIPT = `<script>(function(){function stablePath(p){p=p.replace(/\\/adminer\\/?$/,"").replace(/\\/+$/,"");p=p.replace(/(\\/plugin_widgets\\/\\d+)\\/[^/]+(?=\\/iframe)/,"$1");return p.replace(/\\/plugin_widgets\\/\\d+\\/iframe/,"/iframe")}function canonicalKey(){var p=location.pathname;if(p.indexOf("/iframe")<0)return"";return stablePath(p)}function iframePrefix(){var p=location.pathname;if(p.indexOf("/iframe")<0)return"";return p.replace(/\\/adminer\\/?$/,"").replace(/\\/+$/,"")}function urlSk(){try{return new URL(location.href).searchParams.get("_cy_sk")||""}catch(e){return""}}function baseDir(){var k=iframePrefix();return k?location.origin+k+"/":null}function fixUrl(u){var b=baseDir();if(!b||!u)return u;if(/^https?:\\/\\//i.test(u)||u.indexOf("//")===0)return u;if(u.charAt(0)==="/")return b.replace(/\\/$/,"")+u;if(u.charAt(0)==="?")return b.replace(/\\/?$/,"/")+u;return u}function withSk(u){var k=urlSk();if(!k||!u)return u;try{var n=new URL(u,location.href);if(n.origin!==location.origin)return u;if(!n.searchParams.has("_cy_sk"))n.searchParams.set("_cy_sk",k);return n.pathname+n.search+n.hash}catch(e){return u}}var ck=canonicalKey();if(ck&&!location.search.includes("_cy_sk=")){try{var u=new URL(location.href);u.searchParams.set("_cy_sk",ck);location.replace(u.pathname+u.search+u.hash)}catch(e){}}var key=urlSk();var b=baseDir();if(b&&!document.querySelector("base")){var base=document.createElement("base");base.href=b;(document.head||document.documentElement).prepend(base)}function patch(){document.querySelectorAll("a[href]").forEach(function(el){var h=el.getAttribute("href");if(h&&h.charAt(0)==="/")el.setAttribute("href",withSk(fixUrl(h)))});document.querySelectorAll('form[action^="/"],form:not([action])').forEach(function(el){var a=el.getAttribute("action");if(a&&a.charAt(0)==="/")el.setAttribute("action",withSk(fixUrl(a)))})}patch();new MutationObserver(patch).observe(document.documentElement,{childList:true,subtree:true});document.addEventListener("submit",function(e){var f=e.target;if(!f||f.nodeName!=="FORM")return;var act=f.getAttribute("action");if(!act||act==="/")f.action=withSk(fixUrl(act||"/"));var sk=key||ck;if(sk&&!f.querySelector('input[name="_cy_sk"]')){var i=document.createElement("input");i.type="hidden";i.name="_cy_sk";i.value=sk;f.appendChild(i)}},true);var of=window.fetch;window.fetch=function(input,init){try{var url=typeof input==="string"?input:input.url;if(url&&url.indexOf("adminer.org")>=0)return Promise.resolve(new Response("{}",{status:200,headers:{"content-type":"application/json"}}))}catch(e){}return of.apply(this,arguments)}})();</script>`;
 
 function parseRequestUrl(req: IncomingMessage): URL {
   const host = req.headers.host?.trim() || "localhost";
@@ -822,6 +852,13 @@ const server = createServer(async (req, res) => {
       storedSessionCount: adminerSessions.size,
       referer: req.headers.referer ?? req.headers.referrer ?? null,
       query: url.search || null,
+      proxyContext: {
+        org: url.searchParams.get("org"),
+        project: url.searchParams.get("project"),
+        env: url.searchParams.get("env"),
+        component: url.searchParams.get("component"),
+      },
+      widgetKeyFromQuery: widgetKeyFromQueryParams(req) || null,
     });
   }
 
