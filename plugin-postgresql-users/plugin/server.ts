@@ -1,5 +1,12 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import pg from "pg";
+import {
+  formatReportForLogs,
+  runNetworkDiagnostics,
+  type DbTarget,
+} from "./network-diagnostics.ts";
+
+const PLUGIN_VERSION = "2.0.4";
 
 const port = Number(process.env.PORT);
 if (!Number.isFinite(port) || port <= 0) {
@@ -179,6 +186,63 @@ function resolveDbConfig(): DbConfig {
 
 const DB_CONNECT_TIMEOUT_MS = 15_000;
 
+function resolveDbTarget(): DbTarget | null {
+  if (!DATABASE_URL) return null;
+  const db = parseDatabaseUrl(DATABASE_URL);
+  if (!db) return null;
+  return {
+    host: db.host,
+    port: db.port,
+    username: db.username,
+    database: db.database,
+    ssl: db.ssl,
+  };
+}
+
+async function testPostgresConnection(db: DbConfig): Promise<Record<string, unknown>> {
+  const client = new pg.Client({
+    host: db.host,
+    port: Number(db.port),
+    user: db.username,
+    password: db.password,
+    database: db.database,
+    ssl: db.ssl ? { rejectUnauthorized: false } : undefined,
+    connectionTimeoutMillis: DB_CONNECT_TIMEOUT_MS,
+  });
+  const started = Date.now();
+  await client.connect();
+  const connectMs = Date.now() - started;
+  const result = await client.query<{ version: string; current_user: string; current_database: string }>(
+    "SELECT version(), current_user, current_database()",
+  );
+  await client.end().catch(() => undefined);
+  return {
+    host: db.host,
+    port: db.port,
+    connectMs,
+    version: result.rows[0]?.version,
+    currentUser: result.rows[0]?.current_user,
+    currentDatabase: result.rows[0]?.current_database,
+  };
+}
+
+async function buildNetworkDiagnosticsReport() {
+  let dbConfig: DbConfig | null = null;
+  try {
+    dbConfig = resolveDbConfig();
+  } catch {
+    dbConfig = null;
+  }
+  const target = resolveDbTarget();
+  const report = await runNetworkDiagnostics(
+    PLUGIN_VERSION,
+    target,
+    dbConfig ? () => testPostgresConnection(dbConfig!) : undefined,
+  );
+  console.log(formatReportForLogs(report));
+  return report;
+}
+
 async function withPgClient<T>(db: DbConfig, fn: (client: pg.Client) => Promise<T>): Promise<T> {
   const client = new pg.Client({
     host: db.host,
@@ -317,6 +381,11 @@ function renderUsersPage(users: PgUserRow[], syncedAt: string, error = ""): stri
     th, td { border-bottom: 1px solid #e7ebf3; padding: 0.65rem 0.75rem; text-align: left; white-space: nowrap; }
     th { background: #f8f9fc; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.04em; color: #5c677f; position: sticky; top: 0; }
     tr:last-child td { border-bottom: 0; }
+    .diag { margin-top: 1rem; background: #fff; border: 1px solid #d8deea; border-radius: 10px; padding: 0.75rem 1rem; }
+    .diag summary { cursor: pointer; font-size: 0.875rem; font-weight: 600; }
+    .diag pre { margin: 0.75rem 0 0; padding: 0.75rem; background: #0f172a; color: #e2e8f0; border-radius: 8px; overflow: auto; font-size: 0.75rem; line-height: 1.4; max-height: 420px; white-space: pre-wrap; word-break: break-word; }
+    .diag-actions { margin-top: 0.5rem; display: flex; gap: 0.5rem; }
+    .diag-actions button { font: inherit; font-size: 0.8125rem; padding: 0.35rem 0.65rem; border-radius: 6px; border: 1px solid #c5cee0; background: #fff; cursor: pointer; }
   </style>
 </head>
 <body>
@@ -340,6 +409,14 @@ function renderUsersPage(users: PgUserRow[], syncedAt: string, error = ""): stri
         <tbody id="users-body">${rows}</tbody>
       </table>
     </div>
+    <details id="diag-panel" class="diag" hidden>
+      <summary>Network diagnostics (for Cycloid support)</summary>
+      <div class="diag-actions">
+        <button type="button" id="diag-copy">Copy JSON</button>
+        <button type="button" id="diag-refresh">Re-run diagnostics</button>
+      </div>
+      <pre id="diag-output">Running diagnostics…</pre>
+    </details>
   </main>
 </body>
 </html>`;
@@ -356,6 +433,42 @@ function renderUsersShell(): string {
 (async () => {
   const alertEl = document.getElementById("alert");
   const bodyEl = document.getElementById("users-body");
+  const diagPanel = document.getElementById("diag-panel");
+  const diagOutput = document.getElementById("diag-output");
+  const diagCopy = document.getElementById("diag-copy");
+  const diagRefresh = document.getElementById("diag-refresh");
+  let lastDiagnostics = null;
+
+  async function runDiagnostics() {
+    if (!diagPanel || !diagOutput) return;
+    diagPanel.hidden = false;
+    diagOutput.textContent = "Running diagnostics…";
+    const apiUrl = new URL("api/network-diagnostics", window.location.href).href;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 60000);
+    try {
+      const res = await fetch(apiUrl, { headers: { accept: "application/json" }, signal: controller.signal });
+      const text = await res.text();
+      lastDiagnostics = text ? JSON.parse(text) : null;
+      diagOutput.textContent = JSON.stringify(lastDiagnostics, null, 2);
+    } catch (err) {
+      const msg = err.name === "AbortError" ? "Diagnostics timed out after 60s" : (err.message || String(err));
+      diagOutput.textContent = JSON.stringify({ error: msg }, null, 2);
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  if (diagCopy) {
+    diagCopy.addEventListener("click", async () => {
+      const text = diagOutput ? diagOutput.textContent || "" : "";
+      try { await navigator.clipboard.writeText(text); diagCopy.textContent = "Copied"; }
+      catch { diagCopy.textContent = "Copy failed"; }
+      setTimeout(() => { diagCopy.textContent = "Copy JSON"; }, 1500);
+    });
+  }
+  if (diagRefresh) diagRefresh.addEventListener("click", () => { runDiagnostics(); });
+
   const apiUrl = new URL("api/users", window.location.href).href;
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 20000);
@@ -388,6 +501,7 @@ function renderUsersShell(): string {
       : (err.message || String(err));
     if (alertEl) { alertEl.hidden = false; alertEl.textContent = msg; }
     bodyEl.innerHTML = '<tr><td colspan="7" class="muted">Failed to load users.</td></tr>';
+    await runDiagnostics();
   } finally {
     clearTimeout(timeout);
   }
@@ -395,6 +509,19 @@ function renderUsersShell(): string {
 </script>`;
 
   return page.replace("</body>", `${script}</body>`);
+}
+
+async function handleNetworkDiagnostics(res: ServerResponse): Promise<void> {
+  try {
+    const report = await buildNetworkDiagnosticsReport();
+    res.writeHead(200, {
+      "content-type": "application/json",
+      "x-cy-network-diagnostics-summary": report.summary.slice(0, 500),
+    });
+    res.end(JSON.stringify(report, null, 2));
+  } catch (err) {
+    send(res, 500, { error: (err as Error).message });
+  }
 }
 
 async function handleUsersApi(res: ServerResponse): Promise<void> {
@@ -446,9 +573,17 @@ const server = createServer((req, res) => {
     return;
   }
 
+  if (
+    method === "GET" &&
+    (pathname === "/api/network-diagnostics" || pathname === "/_cy/network-diagnostics")
+  ) {
+    handleNetworkDiagnostics(res).catch((err) => send(res, 500, { error: (err as Error).message }));
+    return;
+  }
+
   send(res, 404, { error: "Not Found" });
 });
 
 server.listen(port, "0.0.0.0", () => {
-  console.log(`[INFO] listening on http://0.0.0.0:${port}`);
+  console.log(`[INFO] listening on http://0.0.0.0:${port} (plugin v${PLUGIN_VERSION})`);
 });

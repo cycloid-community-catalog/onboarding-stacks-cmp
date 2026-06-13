@@ -6,7 +6,7 @@ WORKDIR /plugin
 COPY package.json ./
 RUN npm install --omit=dev
 
-COPY manifest.yaml widgets.yaml server.ts start.sh ./
+COPY manifest.yaml widgets.yaml server.ts network-diagnostics.ts start.sh ./
 RUN chmod +x /plugin/start.sh \
     && test -f /plugin/manifest.yaml \
     && test -f /plugin/widgets.yaml
