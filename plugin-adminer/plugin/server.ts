@@ -66,7 +66,8 @@ function iframeBaseFromPathname(pathname: string): string {
   const afterIframe = pathname.slice(iframeIdx + "/iframe".length);
   const mountMatch = new RegExp(`^${ADMINER_MOUNT}(?:/|$)`).exec(afterIframe);
   if (mountMatch) return `${prefix}${ADMINER_MOUNT}`;
-  return prefix;
+  // Cycloid iframe URL is always .../iframe/; Adminer runs in a nested iframe at .../iframe/adminer/
+  return `${prefix}${ADMINER_MOUNT}`;
 }
 
 function toAdminerPath(pluginPath: string): string {
@@ -208,6 +209,21 @@ function sendJson(res: ServerResponse, status: number, body: object): void {
   res.end(JSON.stringify(body));
 }
 
+/** Outer page at .../iframe/ — loads Adminer in a nested iframe at .../iframe/adminer/ */
+function sendAdminerShell(res: ServerResponse): void {
+  const html = `<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Adminer</title>
+<style>html,body{margin:0;height:100%;overflow:hidden}iframe{width:100%;height:100%;border:0;display:block}</style>
+</head><body>
+<iframe src="adminer/" title="Adminer"></iframe>
+</body></html>`;
+  res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+  res.end(html);
+}
+
 async function readRequestBody(req: IncomingMessage): Promise<Buffer | undefined> {
   const method = req.method ?? "GET";
   if (method === "GET" || method === "HEAD") return undefined;
@@ -300,6 +316,10 @@ const server = createServer(async (req, res) => {
   if (method === "POST" && pathname === "/_cy/events") return sendJson(res, 200, { ok: true });
   if (method === "DELETE" && pathname === "/_cy/plugin") return sendJson(res, 200, { ok: true });
   if (method === "POST" && pathname === "/_cy/resync") return sendJson(res, 200, { started: false });
+
+  if (method === "GET" && (pathname === "/" || pathname === "")) {
+    return sendAdminerShell(res);
+  }
 
   const body = await readRequestBody(req);
   proxyAdminer(req, res, pathname, url.search, url, body);
