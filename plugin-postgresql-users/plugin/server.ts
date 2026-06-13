@@ -1,4 +1,5 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import net from "node:net";
 import pg from "pg";
 import {
   formatReportForLogs,
@@ -8,7 +9,7 @@ import {
   type DbTarget,
 } from "./network-diagnostics.ts";
 
-const PLUGIN_VERSION = "2.0.6";
+const PLUGIN_VERSION = "2.0.8";
 
 const port = Number(process.env.PORT);
 if (!Number.isFinite(port) || port <= 0) {
@@ -17,6 +18,10 @@ if (!Number.isFinite(port) || port <= 0) {
 }
 
 const DATABASE_URL = process.env.DATABASE_URL?.trim() ?? "";
+const DATABASE_SSL_SERVERNAME =
+  process.env.DATABASE_SSL_SERVERNAME?.trim() ||
+  process.env.database_ssl_servername?.trim() ||
+  "";
 
 const SYSTEM_USERS = new Set([
   "postgres",
@@ -35,6 +40,7 @@ type DbConfig = {
   password: string;
   database: string;
   ssl: boolean;
+  sslServerName?: string;
 };
 
 type PgUserRow = {
@@ -49,7 +55,27 @@ type PgUserRow = {
 if (!DATABASE_URL) {
   console.warn("[WARN] DATABASE_URL is not set — set database_url at plugin install time");
 } else {
-  console.log("[INFO] database: configured via DATABASE_URL");
+  try {
+    const db = resolveDbConfig();
+    console.log(
+      `[INFO] database: configured via DATABASE_URL (${db.host}, ssl=${db.ssl}${db.sslServerName ? `, sni=${db.sslServerName}` : ""})`,
+    );
+  } catch {
+    console.log("[INFO] database: configured via DATABASE_URL (invalid or incomplete)");
+  }
+}
+
+function isIpAddress(host: string): boolean {
+  if (net.isIP(host)) return true;
+  return /^\[\da-f:]+\]$/i.test(host) || host.startsWith("[");
+}
+
+function wantsSsl(host: string, sslParam: string | null, sslServerName?: string): boolean {
+  if (sslParam === "require" || sslParam === "verify-ca" || sslParam === "verify-full") return true;
+  if (host.includes(".rds.amazonaws.com") || host.includes(".postgres.database.azure.com")) return true;
+  if (sslServerName) return true;
+  if (isIpAddress(host) && sslParam !== "disable") return true;
+  return false;
 }
 
 function parseRequestUrl(req: IncomingMessage): URL {
@@ -126,12 +152,7 @@ function parseDatabaseUrl(value: string): DbConfig | null {
     if (!host || !username || !password) return null;
 
     const sslParam = url.searchParams.get("sslmode");
-    const ssl =
-      sslParam === "require" ||
-      sslParam === "verify-ca" ||
-      sslParam === "verify-full" ||
-      host.includes(".rds.amazonaws.com") ||
-      host.includes(".postgres.database.azure.com");
+    const ssl = wantsSsl(host, sslParam);
 
     return {
       host,
@@ -146,13 +167,14 @@ function parseDatabaseUrl(value: string): DbConfig | null {
       /^postgres(?:ql)?:\/\/([^@]+)@([^:]+):([^@]+)@([^:/]+)(?::(\d+))?\/([^?]+)/.exec(trimmed);
     if (azure) {
       const host = azure[4];
+      const sslParam = trimmed.includes("sslmode=disable") ? "disable" : trimmed.includes("sslmode=") ? "require" : null;
       return {
         username: decodeURIComponent(azure[1]),
         password: decodeURIComponent(azure[3]),
         host,
         port: azure[5] || "5432",
         database: decodeURIComponent(azure[6]) || "postgres",
-        ssl: host.includes(".postgres.database.azure.com"),
+        ssl: wantsSsl(host, sslParam),
       };
     }
 
@@ -160,13 +182,14 @@ function parseDatabaseUrl(value: string): DbConfig | null {
       /^postgres(?:ql)?:\/\/([^:]+):([^@]+)@([^:/]+)(?::(\d+))?\/([^?]+)/.exec(trimmed);
     if (!legacy) return null;
     const host = legacy[3];
+    const sslParam = trimmed.includes("sslmode=disable") ? "disable" : trimmed.includes("sslmode=") ? "require" : null;
     return {
       username: decodeURIComponent(legacy[1]),
       password: decodeURIComponent(legacy[2]),
       host,
       port: legacy[4] || "5432",
       database: decodeURIComponent(legacy[5]) || "postgres",
-      ssl: host.includes(".rds.amazonaws.com") || host.includes(".postgres.database.azure.com"),
+      ssl: wantsSsl(host, sslParam),
     };
   }
 }
@@ -183,34 +206,71 @@ function resolveDbConfig(): DbConfig {
       "Invalid database_url. Expected postgresql://user:password@host:5432/database",
     );
   }
+  if (DATABASE_SSL_SERVERNAME) {
+    db.ssl = true;
+    db.sslServerName = DATABASE_SSL_SERVERNAME;
+  }
+  if (isIpAddress(db.host) && db.ssl && !db.sslServerName) {
+    console.warn(
+      "[WARN] database_url uses an IP without database_ssl_servername — set the Azure FQDN for TLS SNI",
+    );
+  }
   return db;
 }
 
 const DB_CONNECT_TIMEOUT_MS = 15_000;
 
-function resolveDbTarget(): DbTarget | null {
-  if (!DATABASE_URL) return null;
-  const db = parseDatabaseUrl(DATABASE_URL);
-  if (!db) return null;
+function buildPgClientConfig(db: DbConfig): pg.ClientConfig {
+  const connectionString = `postgresql://${encodeURIComponent(db.username)}:${encodeURIComponent(db.password)}@${db.host}:${db.port}/${encodeURIComponent(db.database)}${db.ssl ? "?sslmode=require" : ""}`;
   return {
-    host: db.host,
-    port: db.port,
-    username: db.username,
-    database: db.database,
-    ssl: db.ssl,
+    connectionString,
+    ssl: db.ssl
+      ? {
+          rejectUnauthorized: false,
+          ...(db.sslServerName ? { servername: db.sslServerName } : {}),
+        }
+      : undefined,
+    connectionTimeoutMillis: DB_CONNECT_TIMEOUT_MS,
+    query_timeout: DB_CONNECT_TIMEOUT_MS,
   };
 }
 
+function formatPgConnectError(db: DbConfig, err: unknown): Error {
+  const message = (err as Error).message ?? String(err);
+  if (/timeout/i.test(message)) {
+    return new Error(
+      `Cannot reach PostgreSQL at ${db.host}:${db.port} (${message}). ` +
+        "Ensure public network access is enabled and the plugin container can reach the database.",
+    );
+  }
+  if (/no encryption|pg_hba|ssl/i.test(message)) {
+    return new Error(
+      `PostgreSQL rejected the connection (${message}). ` +
+        (isIpAddress(db.host)
+          ? "When using an IP (DNS workaround), set database_url with ?sslmode=require and database_ssl_servername to the Azure FQDN."
+          : "Azure requires SSL — use database_url with ?sslmode=require."),
+    );
+  }
+  return err instanceof Error ? err : new Error(message);
+}
+
+function resolveDbTarget(): DbTarget | null {
+  try {
+    const db = resolveDbConfig();
+    return {
+      host: db.host,
+      port: db.port,
+      username: db.username,
+      database: db.database,
+      ssl: db.ssl,
+    };
+  } catch {
+    return null;
+  }
+}
+
 async function testPostgresConnection(db: DbConfig): Promise<Record<string, unknown>> {
-  const client = new pg.Client({
-    host: db.host,
-    port: Number(db.port),
-    user: db.username,
-    password: db.password,
-    database: db.database,
-    ssl: db.ssl ? { rejectUnauthorized: false } : undefined,
-    connectionTimeoutMillis: DB_CONNECT_TIMEOUT_MS,
-  });
+  const client = new pg.Client(buildPgClientConfig(db));
   const started = Date.now();
   await client.connect();
   const connectMs = Date.now() - started;
@@ -275,28 +335,12 @@ function scheduleBackgroundNetworkDiagnostics(): void {
 }
 
 async function withPgClient<T>(db: DbConfig, fn: (client: pg.Client) => Promise<T>): Promise<T> {
-  const client = new pg.Client({
-    host: db.host,
-    port: Number(db.port),
-    user: db.username,
-    password: db.password,
-    database: db.database,
-    ssl: db.ssl ? { rejectUnauthorized: false } : undefined,
-    connectionTimeoutMillis: DB_CONNECT_TIMEOUT_MS,
-    query_timeout: DB_CONNECT_TIMEOUT_MS,
-  });
+  const client = new pg.Client(buildPgClientConfig(db));
   try {
     await client.connect();
     return await fn(client);
   } catch (err) {
-    const message = (err as Error).message ?? String(err);
-    if (/timeout/i.test(message)) {
-      throw new Error(
-        `Cannot reach PostgreSQL at ${db.host}:${db.port} (${message}). ` +
-          "Ensure public network access is enabled and the plugin container can reach the database.",
-      );
-    }
-    throw err;
+    throw formatPgConnectError(db, err);
   } finally {
     await client.end().catch(() => undefined);
   }

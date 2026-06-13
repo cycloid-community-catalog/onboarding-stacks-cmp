@@ -15,6 +15,18 @@ cy plugin upgrade postgresql-users \
 
 The plugin container must be able to reach PostgreSQL on the configured host and port.
 
+### DNS fails in the Cycloid plugin container
+
+If network diagnostics show `dns.lookup` / `EAI_AGAIN` but TCP works, use the database **IP** in `database_url` and set **`database_ssl_servername`** to the Azure/RDS **hostname** (for TLS):
+
+```bash
+cy plugin upgrade "PostgreSQL Users" --version-id <id> \
+  --config database_url='postgresql://psqladmin:secret@51.136.1.208:5432/demopostgresql99?sslmode=require' \
+  --config database_ssl_servername='demopostgres99.postgres.database.azure.com'
+```
+
+Resolve the IP from your workstation: `dig +short demopostgres99.postgres.database.azure.com`
+
 > **Note:** `database_url` is set once per plugin installation. If you have multiple databases, install the plugin separately for each one (or use a different approach for per-component credentials).
 
 ## Widget
