@@ -9,7 +9,7 @@ import {
   type DbTarget,
 } from "./network-diagnostics.ts";
 
-const PLUGIN_VERSION = "2.1.2";
+const PLUGIN_VERSION = "2.1.3";
 
 const APP_ROLES = ["readonly", "readwrite", "admin"] as const;
 type AppRole = (typeof APP_ROLES)[number];
@@ -26,7 +26,8 @@ if (!Number.isFinite(port) || port <= 0) {
   process.exit(1);
 }
 
-const DATABASE_URL = process.env.DATABASE_URL?.trim() ?? "";
+const DATABASE_URL =
+  process.env.DATABASE_URL?.trim() || process.env.database_url?.trim() || "";
 const DATABASE_SSL_SERVERNAME =
   process.env.DATABASE_SSL_SERVERNAME?.trim() ||
   process.env.database_ssl_servername?.trim() ||
@@ -277,20 +278,78 @@ function escapeHtml(s: string): string {
     .replaceAll('"', "&quot;");
 }
 
+function unwrapConfigValue(value: string): string {
+  let trimmed = value.trim();
+  if (
+    (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
+    (trimmed.startsWith("'") && trimmed.endsWith("'"))
+  ) {
+    trimmed = trimmed.slice(1, -1).trim();
+  }
+  return trimmed;
+}
+
+function sslModeFromUrl(value: string): string | null {
+  if (/[?&]sslmode=disable\b/i.test(value)) return "disable";
+  if (/[?&]sslmode=(require|verify-ca|verify-full)\b/i.test(value)) return "require";
+  return null;
+}
+
 function parseDatabaseUrl(value: string): DbConfig | null {
-  const trimmed = value.trim();
+  const trimmed = unwrapConfigValue(value);
   if (!trimmed) return null;
 
+  const normalized = trimmed.replace(/^postgres:\/\//, "postgresql://");
+  const sslParam = sslModeFromUrl(normalized);
+
+  const standard =
+    /^postgres(?:ql)?:\/\/([^:/?#]+):([^@/?#]*)@(\[[^\]]+\]|[^:/?#@]+)(?::(\d+))?\/([^?#]*)/.exec(
+      normalized,
+    );
+  if (standard) {
+    const hostRaw = standard[3]!;
+    const host = hostRaw.startsWith("[") ? hostRaw.slice(1, -1) : hostRaw;
+    const username = decodeURIComponent(standard[1]!);
+    const password = decodeURIComponent(standard[2]!);
+    const database = decodeURIComponent(standard[5]! || "postgres") || "postgres";
+    if (!username || !host) return null;
+    return {
+      host,
+      port: standard[4] || "5432",
+      username,
+      password,
+      database,
+      ssl: wantsSsl(host, sslParam),
+    };
+  }
+
+  const azure =
+    /^postgres(?:ql)?:\/\/([^@/]+)@([^:/?#]+):([^@/?#]*)@(\[[^\]]+\]|[^:/?#@]+)(?::(\d+))?\/([^?#]*)/.exec(
+      normalized,
+    );
+  if (azure) {
+    const hostRaw = azure[4]!;
+    const host = hostRaw.startsWith("[") ? hostRaw.slice(1, -1) : hostRaw;
+    const username = decodeURIComponent(azure[1]!);
+    const password = decodeURIComponent(azure[3]!);
+    const database = decodeURIComponent(azure[6]! || "postgres") || "postgres";
+    if (!username || !host) return null;
+    return {
+      host,
+      port: azure[5] || "5432",
+      username,
+      password,
+      database,
+      ssl: wantsSsl(host, sslParam),
+    };
+  }
+
   try {
-    const normalized = trimmed.replace(/^postgres:\/\//, "postgresql://");
     const url = new URL(normalized);
     const host = url.hostname;
     const username = decodeURIComponent(url.username);
     const password = decodeURIComponent(url.password);
-    if (!host || !username || !password) return null;
-
-    const sslParam = url.searchParams.get("sslmode");
-    const ssl = wantsSsl(host, sslParam);
+    if (!host || !username) return null;
 
     return {
       host,
@@ -298,37 +357,10 @@ function parseDatabaseUrl(value: string): DbConfig | null {
       username,
       password,
       database: decodeURIComponent(url.pathname.replace(/^\//, "") || "postgres"),
-      ssl,
+      ssl: wantsSsl(host, url.searchParams.get("sslmode") ?? sslParam),
     };
   } catch {
-    const azure =
-      /^postgres(?:ql)?:\/\/([^@]+)@([^:]+):([^@]+)@([^:/]+)(?::(\d+))?\/([^?]+)/.exec(trimmed);
-    if (azure) {
-      const host = azure[4];
-      const sslParam = trimmed.includes("sslmode=disable") ? "disable" : trimmed.includes("sslmode=") ? "require" : null;
-      return {
-        username: decodeURIComponent(azure[1]),
-        password: decodeURIComponent(azure[3]),
-        host,
-        port: azure[5] || "5432",
-        database: decodeURIComponent(azure[6]) || "postgres",
-        ssl: wantsSsl(host, sslParam),
-      };
-    }
-
-    const legacy =
-      /^postgres(?:ql)?:\/\/([^:]+):([^@]+)@([^:/]+)(?::(\d+))?\/([^?]+)/.exec(trimmed);
-    if (!legacy) return null;
-    const host = legacy[3];
-    const sslParam = trimmed.includes("sslmode=disable") ? "disable" : trimmed.includes("sslmode=") ? "require" : null;
-    return {
-      username: decodeURIComponent(legacy[1]),
-      password: decodeURIComponent(legacy[2]),
-      host,
-      port: legacy[4] || "5432",
-      database: decodeURIComponent(legacy[5]) || "postgres",
-      ssl: wantsSsl(host, sslParam),
-    };
+    return null;
   }
 }
 
@@ -340,8 +372,11 @@ function resolveDbConfig(): DbConfig {
   }
   const db = parseDatabaseUrl(DATABASE_URL);
   if (!db) {
+    const hint = DATABASE_URL.includes("@")
+      ? ""
+      : " The value looks truncated (missing @host) — use single quotes when passing database_url on the CLI.";
     throw new Error(
-      "Invalid database_url. Expected postgresql://user:password@host:5432/database",
+      "Invalid database_url. Expected postgresql://user:password@host:5432/database" + hint,
     );
   }
   if (DATABASE_SSL_SERVERNAME) {
