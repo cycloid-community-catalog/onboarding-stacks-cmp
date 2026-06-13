@@ -44,17 +44,12 @@ Tag must match `package.json` version (semver).
 
 - Confirm `database_url` is correct (user, password, host, port, database).
 - Confirm the plugin container can reach the database (security groups, VPC, firewall).
-- Open the **PostgreSQL Users** tab and expand **Network diagnostics** (shown automatically on failure), or call:
+- Open the **PostgreSQL Users** tab — an instant diagnostics snapshot is embedded in the page on error (no second request).
+- Network tests (DNS/TCP/postgres) run **asynchronously in plugin logs** (can take up to 30s):
 
 ```bash
-# From Cycloid UI: open DevTools → Network → copy the iframe base URL, then:
-curl -fsS "<iframe-base-url>?path=/api/network-diagnostics" -H 'accept: application/json'
-
-# Or from plugin logs after opening the tab / hitting the endpoint:
 cy plugin logs cycloid-plugin-postgresql-users | grep NETWORK-DIAG
 ```
-
-The diagnostics report includes DNS resolution, `/etc/resolv.conf`, container egress IP, control TCP checks (1.1.1.1:443, 8.8.8.8:53), PostgreSQL TCP/TLS, and a full `postgres.connect` attempt. Attach the JSON to Cycloid support tickets.
 
 **Empty table**
 

@@ -23,7 +23,7 @@ export type DiagnosticStep = {
 export type NetworkDiagnosticsReport = {
   generatedAt: string;
   pluginVersion: string;
-  mode: "quick" | "full";
+  mode: "instant" | "quick" | "full";
   summary: string;
   note?: string;
   target: Record<string, unknown> | null;
@@ -50,6 +50,69 @@ export const FULL_DIAGNOSTIC_OPTIONS: DiagnosticOptions = {
   httpTimeoutMs: 8_000,
   includePostgresConnect: true,
 };
+
+const BACKGROUND_NOTE =
+  "Network tests (DNS/TCP/TLS/postgres.connect) run asynchronously in plugin logs — " +
+  "cy plugin logs cycloid-plugin-postgresql-users | grep NETWORK-DIAG";
+
+export function runInstantDiagnostics(
+  pluginVersion: string,
+  target: Record<string, unknown> | null,
+): NetworkDiagnosticsReport {
+  const steps: DiagnosticStep[] = [
+    {
+      step: "container.info",
+      status: "ok",
+      durationMs: 0,
+      details: {
+        hostname: os.hostname(),
+        platform: process.platform,
+        arch: process.arch,
+        nodeVersion: process.version,
+        uptimeSec: Math.round(process.uptime()),
+        pid: process.pid,
+        env: {
+          PORT: process.env.PORT ?? null,
+          DATABASE_URL: process.env.DATABASE_URL ? "[set]" : "[unset]",
+          HOSTNAME: process.env.HOSTNAME ?? null,
+          KUBERNETES_SERVICE_HOST: process.env.KUBERNETES_SERVICE_HOST ?? null,
+          CY_ORG: process.env.CY_ORG ?? null,
+          CY_PROJECT: process.env.CY_PROJECT ?? null,
+          CY_ENV: process.env.CY_ENV ?? null,
+          CY_COMPONENT: process.env.CY_COMPONENT ?? null,
+        },
+      },
+    },
+    {
+      step: "dns.resolv_conf",
+      status: "ok",
+      durationMs: 0,
+      details: (() => {
+        try {
+          return { content: fs.readFileSync("/etc/resolv.conf", "utf8").trim() };
+        } catch (err) {
+          return { message: (err as Error).message };
+        }
+      })(),
+    },
+    {
+      step: "network.interfaces",
+      status: "ok",
+      durationMs: 0,
+      details: { interfaces: os.networkInterfaces() },
+    },
+  ];
+
+  return {
+    generatedAt: new Date().toISOString(),
+    pluginVersion,
+    mode: "instant",
+    summary: "Instant container snapshot returned. See plugin logs for network test results.",
+    note: BACKGROUND_NOTE,
+    target,
+    steps,
+  };
+}
 
 function elapsed(start: number): number {
   return Date.now() - start;
@@ -392,7 +455,7 @@ export async function runNetworkDiagnostics(
     mode,
     summary: buildSummary(steps),
     note: quick
-      ? "Quick report (≤4s). Full diagnostics including postgres.connect are logged asynchronously — run: cy plugin logs cycloid-plugin-postgresql-users | grep NETWORK-DIAG"
+      ? BACKGROUND_NOTE
       : undefined,
     target: redactTarget(db),
     steps,

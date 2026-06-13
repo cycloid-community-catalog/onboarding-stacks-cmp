@@ -3,12 +3,12 @@ import pg from "pg";
 import {
   formatReportForLogs,
   FULL_DIAGNOSTIC_OPTIONS,
-  QUICK_DIAGNOSTIC_OPTIONS,
+  runInstantDiagnostics,
   runNetworkDiagnostics,
   type DbTarget,
 } from "./network-diagnostics.ts";
 
-const PLUGIN_VERSION = "2.0.5";
+const PLUGIN_VERSION = "2.0.6";
 
 const port = Number(process.env.PORT);
 if (!Number.isFinite(port) || port <= 0) {
@@ -228,23 +228,50 @@ async function testPostgresConnection(db: DbConfig): Promise<Record<string, unkn
   };
 }
 
-async function buildNetworkDiagnosticsReport(quick = true) {
-  let dbConfig: DbConfig | null = null;
-  try {
-    dbConfig = resolveDbConfig();
-  } catch {
-    dbConfig = null;
-  }
-  const target = resolveDbTarget();
-  const options = quick ? QUICK_DIAGNOSTIC_OPTIONS : FULL_DIAGNOSTIC_OPTIONS;
-  const report = await runNetworkDiagnostics(
-    PLUGIN_VERSION,
-    target,
-    dbConfig ? () => testPostgresConnection(dbConfig!) : undefined,
-    options,
-  );
-  console.log(formatReportForLogs(report));
-  return report;
+function instantDiagnosticsTarget(): Record<string, unknown> | null {
+  const db = resolveDbTarget();
+  if (!db) return null;
+  return {
+    host: db.host,
+    port: db.port,
+    username: db.username,
+    database: db.database,
+    ssl: db.ssl,
+    password: "[redacted]",
+  };
+}
+
+function buildInstantDiagnosticsReport() {
+  return runInstantDiagnostics(PLUGIN_VERSION, instantDiagnosticsTarget());
+}
+
+let backgroundDiagnosticsRunning = false;
+
+function scheduleBackgroundNetworkDiagnostics(): void {
+  if (backgroundDiagnosticsRunning) return;
+  backgroundDiagnosticsRunning = true;
+  void (async () => {
+    try {
+      let dbConfig: DbConfig | null = null;
+      try {
+        dbConfig = resolveDbConfig();
+      } catch {
+        dbConfig = null;
+      }
+      const target = resolveDbTarget();
+      const report = await runNetworkDiagnostics(
+        PLUGIN_VERSION,
+        target,
+        dbConfig ? () => testPostgresConnection(dbConfig!) : undefined,
+        FULL_DIAGNOSTIC_OPTIONS,
+      );
+      console.log(formatReportForLogs(report));
+    } catch (err) {
+      console.error("[NETWORK-DIAG] background report failed:", (err as Error).message);
+    } finally {
+      backgroundDiagnosticsRunning = false;
+    }
+  })();
 }
 
 async function withPgClient<T>(db: DbConfig, fn: (client: pg.Client) => Promise<T>): Promise<T> {
@@ -419,14 +446,15 @@ function renderUsersPage(users: PgUserRow[], syncedAt: string, error = ""): stri
         <button type="button" id="diag-copy">Copy JSON</button>
         <button type="button" id="diag-refresh">Re-run diagnostics</button>
       </div>
-      <pre id="diag-output">Running diagnostics…</pre>
+      <pre id="diag-output"></pre>
     </details>
   </main>
 </body>
 </html>`;
 }
 
-function renderUsersShell(): string {
+function renderUsersShell(instantReport: ReturnType<typeof buildInstantDiagnosticsReport>): string {
+  const embeddedDiagnostics = JSON.stringify(instantReport).replace(/<\//g, "<\\/");
   const page = renderUsersPage([], "", "").replace(
     `<tbody id="users-body"><tr><td colspan="7" class="muted">No application users found.</td></tr></tbody>`,
     `<tbody id="users-body"><tr><td colspan="7" class="muted">Loading users…</td></tr></tbody>`,
@@ -443,6 +471,15 @@ function renderUsersShell(): string {
   const diagRefresh = document.getElementById("diag-refresh");
   let lastDiagnostics = null;
 
+  const embeddedDiagnostics = ${embeddedDiagnostics};
+
+  function showDiagnostics(report) {
+    if (!diagPanel || !diagOutput) return;
+    diagPanel.hidden = false;
+    lastDiagnostics = report;
+    diagOutput.textContent = JSON.stringify(report, null, 2);
+  }
+
   async function pluginApiUrl(path) {
     const url = new URL(window.location.href);
     url.searchParams.set("path", path);
@@ -450,20 +487,21 @@ function renderUsersShell(): string {
   }
 
   async function runDiagnostics() {
-    if (!diagPanel || !diagOutput) return;
-    diagPanel.hidden = false;
-    diagOutput.textContent = "Running diagnostics…";
+    showDiagnostics(embeddedDiagnostics);
     const apiUrl = await pluginApiUrl("/api/network-diagnostics");
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 15000);
+    const timeout = setTimeout(() => controller.abort(), 8000);
     try {
       const res = await fetch(apiUrl, { headers: { accept: "application/json" }, signal: controller.signal });
       const text = await res.text();
-      lastDiagnostics = text ? JSON.parse(text) : null;
-      diagOutput.textContent = JSON.stringify(lastDiagnostics, null, 2);
+      const data = text ? JSON.parse(text) : null;
+      if (!res.ok) throw new Error((data && data.error) || ("HTTP " + res.status));
+      showDiagnostics(data);
     } catch (err) {
-      const msg = err.name === "AbortError" ? "Diagnostics timed out after 60s" : (err.message || String(err));
-      diagOutput.textContent = JSON.stringify({ error: msg }, null, 2);
+      const msg = err.name === "AbortError"
+        ? "Diagnostics API timed out after 8s (Cycloid proxy). Instant snapshot is shown above; network tests are in plugin logs."
+        : (err.message || String(err));
+      showDiagnostics({ ...embeddedDiagnostics, fetchError: msg });
     } finally {
       clearTimeout(timeout);
     }
@@ -511,7 +549,7 @@ function renderUsersShell(): string {
       : (err.message || String(err));
     if (alertEl) { alertEl.hidden = false; alertEl.textContent = msg; }
     bodyEl.innerHTML = '<tr><td colspan="7" class="muted">Failed to load users.</td></tr>';
-    await runDiagnostics();
+    showDiagnostics(embeddedDiagnostics);
   } finally {
     clearTimeout(timeout);
   }
@@ -522,20 +560,10 @@ function renderUsersShell(): string {
 }
 
 async function handleNetworkDiagnostics(res: ServerResponse): Promise<void> {
-  try {
-    const report = await buildNetworkDiagnosticsReport(true);
-    res.writeHead(200, {
-      "content-type": "application/json",
-      "x-cy-network-diagnostics-summary": report.summary.slice(0, 500),
-      "x-cy-network-diagnostics-mode": report.mode,
-    });
-    res.end(JSON.stringify(report, null, 2));
-    void buildNetworkDiagnosticsReport(false).catch((err) =>
-      console.error("[NETWORK-DIAG] full report failed:", (err as Error).message),
-    );
-  } catch (err) {
-    send(res, 500, { error: (err as Error).message });
-  }
+  scheduleBackgroundNetworkDiagnostics();
+  const report = buildInstantDiagnosticsReport();
+  console.log(formatReportForLogs(report));
+  send(res, 200, report);
 }
 
 async function handleUsersApi(res: ServerResponse): Promise<void> {
@@ -578,7 +606,8 @@ const server = createServer((req, res) => {
   }
 
   if (method === "GET" && (pathname === "/" || pathname === "/index.html" || pathname === "/ui/users")) {
-    send(res, 200, renderUsersShell(), "text/html; charset=utf-8");
+    scheduleBackgroundNetworkDiagnostics();
+    send(res, 200, renderUsersShell(buildInstantDiagnosticsReport()), "text/html; charset=utf-8");
     return;
   }
 
