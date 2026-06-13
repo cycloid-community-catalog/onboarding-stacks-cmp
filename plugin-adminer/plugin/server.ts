@@ -1,5 +1,6 @@
 import { createServer, type IncomingMessage, type IncomingHttpHeaders, type ServerResponse } from "node:http";
 import { request as httpRequest } from "node:http";
+import { randomBytes } from "node:crypto";
 
 const port = Number(process.env.PORT);
 if (!Number.isFinite(port) || port <= 0) {
@@ -14,6 +15,27 @@ const MAX_INTERNAL_REDIRECTS = 5;
 
 /** Cycloid may not forward browser Cookie headers to the plugin; bridge Adminer sessions in-process. */
 const adminerSessions = new Map<string, { cookieHeader: string; updatedAt: number }>();
+/** Short _cy_sk token → canonical widget iframe path (avoids multi-KB query strings). */
+const shortSessionKeys = new Map<string, string>();
+
+function canonicalSessionKey(raw: string): string {
+  return raw.replace(/\/adminer\/?$/i, "").replace(/\/$/, "");
+}
+
+function resolveSessionKeyParam(raw: string): string {
+  const decoded = decodeURIComponent(raw).replace(/\/$/, "");
+  if (decoded.startsWith("/organizations/")) return canonicalSessionKey(decoded);
+  return shortSessionKeys.get(decoded) ?? decoded;
+}
+
+function publicSessionParam(canonicalKey: string): string {
+  for (const [short, full] of shortSessionKeys) {
+    if (full === canonicalKey) return short;
+  }
+  const short = randomBytes(8).toString("hex");
+  shortSessionKeys.set(short, canonicalKey);
+  return short;
+}
 
 function parseCookieHeader(header: string | undefined): Map<string, string> {
   const map = new Map<string, string>();
@@ -31,11 +53,11 @@ function buildCookieHeader(pairs: Map<string, string>): string {
 
 function adminerSessionKey(req: IncomingMessage, search = "", body?: Buffer): string {
   const fromQuery = new URLSearchParams(search.startsWith("?") ? search.slice(1) : search).get("_cy_sk");
-  if (fromQuery) return fromQuery.replace(/\/$/, "");
+  if (fromQuery) return resolveSessionKeyParam(fromQuery);
 
   if (body && body.length > 0) {
     const match = /(?:^|&)_cy_sk=([^&]*)/.exec(body.toString("utf8"));
-    if (match) return decodeURIComponent(match[1]).replace(/\/$/, "");
+    if (match) return resolveSessionKeyParam(match[1]);
   }
 
   const headerNames = [
@@ -47,22 +69,22 @@ function adminerSessionKey(req: IncomingMessage, search = "", body?: Buffer): st
   for (const name of headerNames) {
     const value = req.headers[name];
     if (typeof value !== "string") continue;
-    const match = /(\/organizations\/[^\s?]*\/iframe(?:\/adminer)?)/.exec(value);
-    if (match) return match[1].replace(/\/$/, "");
+    const match = /(\/organizations\/[^\s?]*\/iframe)/.exec(value);
+    if (match) return canonicalSessionKey(match[1]);
   }
   const referer = req.headers.referer ?? req.headers.referrer;
   if (typeof referer === "string") {
-    const match = /(\/organizations\/[^\s?]*\/iframe(?:\/adminer)?)/.exec(referer);
-    if (match) return match[1].replace(/\/$/, "");
+    const match = /(\/organizations\/[^\s?]*\/iframe)/.exec(referer);
+    if (match) return canonicalSessionKey(match[1]);
     try {
       const path = new URL(referer).pathname;
-      if (path.includes("/iframe")) return path.replace(/\/$/, "");
+      if (path.includes("/iframe")) return canonicalSessionKey(path);
     } catch {
       /* ignore malformed referer */
     }
   }
   const base = parseCookieHeader(req.headers.cookie).get("cy_adminer_base");
-  if (base) return base.replace(/\/$/, "");
+  if (base) return canonicalSessionKey(decodeURIComponent(base));
   return "";
 }
 
@@ -151,6 +173,16 @@ function locationToAdminerPath(location: string): string {
   return `${adminerPath}${query}`;
 }
 
+function injectAdminerSessionHeaders(headers: Record<string, string>, sessionKey: string): void {
+  const stored = sessionKey ? adminerSessions.get(sessionKey) : undefined;
+  if (!stored) return;
+  const pairs = parseCookieHeader(stored.cookieHeader);
+  const sid = pairs.get("adminer_sid");
+  const key = pairs.get("adminer_key");
+  if (sid) headers["x-cy-adminer-sid"] = sid;
+  if (key) headers["x-cy-adminer-key"] = key;
+}
+
 function buildUpstreamHeaders(
   req: IncomingMessage,
   sessionKey: string,
@@ -164,6 +196,7 @@ function buildUpstreamHeaders(
   headers.host = `127.0.0.1:${ADMINER_PORT}`;
   applyStoredAdminerSession(req, sessionKey);
   if (req.headers.cookie) headers.cookie = String(req.headers.cookie);
+  injectAdminerSessionHeaders(headers, sessionKey);
   rememberOutgoingAdminerCookies(sessionKey, headers.cookie);
   if (body !== undefined) headers["content-length"] = String(body.length);
   return headers;
@@ -190,7 +223,7 @@ function resolveSessionKey(
   publicBasePath: string,
 ): string {
   let key = adminerSessionKey(req, search, body);
-  if (!key && publicBasePath) key = publicBasePath;
+  if (!key && publicBasePath) key = canonicalSessionKey(publicBasePath);
   if (!key && adminerSessions.size === 1) {
     key = adminerSessions.keys().next().value ?? "";
   }
@@ -204,14 +237,15 @@ function requestOrigin(req: IncomingMessage): string {
 }
 
 function appendSessionKeyToPath(pathAndQuery: string, sessionKey: string, origin?: string): string {
-  if (!sessionKey || pathAndQuery.includes("_cy_sk=")) {
+  const param = sessionKey ? publicSessionParam(sessionKey) : "";
+  if (!param || pathAndQuery.includes("_cy_sk=")) {
     return origin && pathAndQuery.startsWith("/") ? `${origin}${pathAndQuery}` : pathAndQuery;
   }
   const q = pathAndQuery.indexOf("?");
   const path = q >= 0 ? pathAndQuery.slice(0, q) : pathAndQuery;
   const query = q >= 0 ? pathAndQuery.slice(q + 1) : "";
   const params = new URLSearchParams(query);
-  params.set("_cy_sk", sessionKey);
+  params.set("_cy_sk", param);
   const qs = params.toString();
   const result = qs ? `${path}?${qs}` : path;
   return origin && path.startsWith("/") ? `${origin}${result}` : result;
@@ -260,8 +294,8 @@ const HOP_BY_HOP_HEADERS = new Set([
   "upgrade",
 ]);
 
-/** Client fixes: reload once with _cy_sk in URL, then rewrite forms/links. */
-const IFRAME_CLIENT_SCRIPT = `<script>(function(){function sessionKey(){var p=location.pathname;if(p.indexOf("/iframe")<0)return"";if(p.indexOf("/iframe/adminer")<0)p=p.replace(/\\/?$/,"")+"/adminer";return p.replace(/\\/$/,"")}function baseDir(){var k=sessionKey();return k?location.origin+k+"/":null}function fixUrl(u){var b=baseDir();if(!b||!u)return u;if(/^https?:\\/\\//i.test(u)||u.indexOf("//")===0)return u;if(u.charAt(0)==="/")return b.replace(/\\/$/,"")+u;if(u.charAt(0)==="?")return b.replace(/\\/?$/,"/")+u;return u}function withSk(u){var k=sessionKey();if(!k||!u)return u;try{var n=new URL(u,location.href);if(n.origin!==location.origin)return u;if(!n.searchParams.has("_cy_sk"))n.searchParams.set("_cy_sk",k);return n.pathname+n.search+n.hash}catch(e){return u}}var key=sessionKey();if(key&&!location.search.includes("_cy_sk=")){try{var u=new URL(location.href);u.searchParams.set("_cy_sk",key);location.replace(u.pathname+u.search+u.hash);return}catch(e){}}var b=baseDir();if(b&&!document.querySelector("base")){var base=document.createElement("base");base.href=b;(document.head||document.documentElement).prepend(base)}function patch(){document.querySelectorAll("a[href]").forEach(function(el){var h=el.getAttribute("href");if(h&&h.charAt(0)==="/")el.setAttribute("href",withSk(fixUrl(h)))});document.querySelectorAll('form[action^="/"],form:not([action])').forEach(function(el){var a=el.getAttribute("action");if(a&&a.charAt(0)==="/")el.setAttribute("action",withSk(fixUrl(a)))})}patch();new MutationObserver(patch).observe(document.documentElement,{childList:true,subtree:true});document.addEventListener("submit",function(e){var f=e.target;if(!f||f.nodeName!=="FORM")return;var act=f.getAttribute("action");if(!act||act==="/")f.action=withSk(fixUrl(act||"/"));if(key&&!f.querySelector('input[name="_cy_sk"]')){var i=document.createElement("input");i.type="hidden";i.name="_cy_sk";i.value=key;f.appendChild(i)}},true);var of=window.fetch;window.fetch=function(input,init){try{var url=typeof input==="string"?input:input.url;if(url&&url.indexOf("adminer.org")>=0)return Promise.resolve(new Response("{}",{status:200,headers:{"content-type":"application/json"}}))}catch(e){}return of.apply(this,arguments)}})();</script>`;
+/** Client fixes: rewrite forms/links; _cy_sk comes from URL (short token injected by server). */
+const IFRAME_CLIENT_SCRIPT = `<script>(function(){function urlSk(){try{return new URL(location.href).searchParams.get("_cy_sk")||""}catch(e){return""}}function sessionKey(){var p=location.pathname;if(p.indexOf("/iframe")<0)return"";return p.replace(/\\/adminer\\/?$/,"").replace(/\\/$/,"")}function baseDir(){var k=sessionKey();return k?location.origin+k+"/":null}function fixUrl(u){var b=baseDir();if(!b||!u)return u;if(/^https?:\\/\\//i.test(u)||u.indexOf("//")===0)return u;if(u.charAt(0)==="/")return b.replace(/\\/$/,"")+u;if(u.charAt(0)==="?")return b.replace(/\\/?$/,"/")+u;return u}function withSk(u){var k=urlSk();if(!k||!u)return u;try{var n=new URL(u,location.href);if(n.origin!==location.origin)return u;if(!n.searchParams.has("_cy_sk"))n.searchParams.set("_cy_sk",k);return n.pathname+n.search+n.hash}catch(e){return u}}var key=urlSk();var b=baseDir();if(b&&!document.querySelector("base")){var base=document.createElement("base");base.href=b;(document.head||document.documentElement).prepend(base)}function patch(){document.querySelectorAll("a[href]").forEach(function(el){var h=el.getAttribute("href");if(h&&h.charAt(0)==="/")el.setAttribute("href",withSk(fixUrl(h)))});document.querySelectorAll('form[action^="/"],form:not([action])').forEach(function(el){var a=el.getAttribute("action");if(a&&a.charAt(0)==="/")el.setAttribute("action",withSk(fixUrl(a)))})}patch();new MutationObserver(patch).observe(document.documentElement,{childList:true,subtree:true});document.addEventListener("submit",function(e){var f=e.target;if(!f||f.nodeName!=="FORM")return;var act=f.getAttribute("action");if(!act||act==="/")f.action=withSk(fixUrl(act||"/"));if(key&&!f.querySelector('input[name="_cy_sk"]')){var i=document.createElement("input");i.type="hidden";i.name="_cy_sk";i.value=key;f.appendChild(i)}},true);var of=window.fetch;window.fetch=function(input,init){try{var url=typeof input==="string"?input:input.url;if(url&&url.indexOf("adminer.org")>=0)return Promise.resolve(new Response("{}",{status:200,headers:{"content-type":"application/json"}}))}catch(e){}return of.apply(this,arguments)}})();</script>`;
 
 function parseRequestUrl(req: IncomingMessage): URL {
   const host = req.headers.host?.trim() || "localhost";
@@ -302,11 +336,7 @@ function iframeBaseFromPathname(pathname: string): string {
   const iframeIdx = pathname.indexOf("/iframe");
   if (iframeIdx < 0) return "";
   const prefix = pathname.slice(0, iframeIdx + "/iframe".length);
-  const afterIframe = pathname.slice(iframeIdx + "/iframe".length);
-  const mountMatch = new RegExp(`^${ADMINER_MOUNT}(?:/|$)`).exec(afterIframe);
-  if (mountMatch) return `${prefix}${ADMINER_MOUNT}`;
-  // Cycloid iframe URL is always .../iframe/; Adminer runs in a nested iframe at .../iframe/adminer/
-  return `${prefix}${ADMINER_MOUNT}`;
+  return prefix;
 }
 
 function toAdminerPath(pluginPath: string): string {
@@ -421,19 +451,11 @@ function rewriteLocation(
 }
 
 function rewriteSetCookie(cookie: string, _publicBasePath: string): string {
-  let out = cookie;
-  if (/;\s*path=/i.test(out)) {
-    out = out.replace(/;\s*path=[^;]*/i, "; Path=/");
-  } else {
-    out += "; Path=/";
-  }
-  if (/;\s*samesite=/i.test(out)) {
-    out = out.replace(/;\s*samesite=[^;]*/i, "; SameSite=None");
-  } else {
-    out += "; SameSite=None";
-  }
-  if (!/;\s*secure(?:;|$)/i.test(out)) out += "; Secure";
-  return out;
+  const nameValue = cookie.trim().split(";")[0]?.trim() ?? cookie.trim();
+  if (!nameValue.includes("=")) return cookie;
+  const attrs = ["Path=/", "SameSite=None", "Secure"];
+  if (/httponly/i.test(cookie)) attrs.push("HttpOnly");
+  return `${nameValue}; ${attrs.join("; ")}`;
 }
 
 function buildCyAdminerBaseCookie(publicBasePath: string): string {
@@ -491,7 +513,7 @@ function rewriteRootRelativeUrls(html: string, publicBasePath: string): string {
   );
 }
 
-function injectIframeFixes(html: string, publicBase: { href: string; path: string }): string {
+function injectIframeFixes(html: string, publicBase: { href: string; path: string }, sessionKey: string): string {
   if (!html.includes("<")) return html;
 
   let out = stripExternalVersionCheck(html);
@@ -506,32 +528,21 @@ function injectIframeFixes(html: string, publicBase: { href: string; path: strin
     }
   }
 
+  const skParam = sessionKey ? publicSessionParam(sessionKey) : "";
+  const skScript = skParam
+    ? `<script>(function(){if(location.search.includes("_cy_sk="))return;try{var u=new URL(location.href);u.searchParams.set("_cy_sk","${skParam}");location.replace(u.pathname+u.search+u.hash)}catch(e){}})();</script>`
+    : "";
+
+  const script = skScript + IFRAME_CLIENT_SCRIPT;
   if (/<head[\s>]/i.test(out)) {
-    return out.replace(/<head(\s[^>]*)?>/i, (m) => `${m}${IFRAME_CLIENT_SCRIPT}`);
+    return out.replace(/<head(\s[^>]*)?>/i, (m) => `${m}${script}`);
   }
-  return `${IFRAME_CLIENT_SCRIPT}${out}`;
+  return `${script}${out}`;
 }
 
 function sendJson(res: ServerResponse, status: number, body: object): void {
   res.writeHead(status, { "content-type": "application/json" });
   res.end(JSON.stringify(body));
-}
-
-/** Outer page at .../iframe/ — loads Adminer in a nested iframe at .../iframe/adminer/ */
-function sendAdminerShell(res: ServerResponse): void {
-  const html = `<!DOCTYPE html>
-<html lang="en"><head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Adminer</title>
-<style>html,body{margin:0;height:100%;overflow:hidden;position:relative}iframe{width:100%;height:100%;border:0;display:block}.cy-open-tab{position:absolute;top:8px;right:12px;z-index:1;font:13px/1.4 sans-serif}.cy-open-tab a{color:#1c9797}</style>
-</head><body>
-<p class="cy-open-tab"><a id="cy-open-tab" href="#" target="_blank" rel="noopener">Open Adminer in new tab</a></p>
-<iframe id="adminer" title="Adminer"></iframe>
-<script>(function(){var sk=location.pathname.replace(/\\/?$/,"")+"/adminer";var u=sk+"?_cy_sk="+encodeURIComponent(sk);document.getElementById("adminer").src=u;var a=document.getElementById("cy-open-tab");a.href=u})();</script>
-</body></html>`;
-  res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
-  res.end(html);
 }
 
 async function readRequestBody(req: IncomingMessage): Promise<Buffer | undefined> {
@@ -572,7 +583,7 @@ function respondAdminerUpstream(
   const stored = ctx.sessionKey ? adminerSessions.get(ctx.sessionKey) : undefined;
   const cookieNames = stored ? [...parseCookieHeader(stored.cookieHeader).keys()].join(",") : "-";
   responseHeaders["x-cy-adminer-debug"] =
-    `key=${ctx.sessionKey || "-"} bridged=${ctx.bridged} stored=${Boolean(stored)} cookies=${cookieNames} redirects=${ctx.redirectCount}`;
+    `key=${ctx.sessionKey || "-"} sk=${ctx.sessionKey ? publicSessionParam(ctx.sessionKey) : "-"} bridged=${ctx.bridged} stored=${Boolean(stored)} cookies=${cookieNames} redirects=${ctx.redirectCount}`;
 
   const statusCode =
     internalizedRedirect && (upstreamRes.statusCode ?? 0) >= 300 && (upstreamRes.statusCode ?? 0) < 400
@@ -590,7 +601,7 @@ function respondAdminerUpstream(
   upstreamRes.on("data", (chunk: Buffer) => chunks.push(chunk));
   upstreamRes.on("end", () => {
     const raw = Buffer.concat(chunks).toString("utf8");
-    const body = Buffer.from(injectIframeFixes(raw, ctx.publicBase), "utf8");
+    const body = Buffer.from(injectIframeFixes(raw, ctx.publicBase, ctx.sessionKey), "utf8");
     responseHeaders["content-length"] = String(body.length);
     ctx.res.writeHead(statusCode, responseHeaders);
     ctx.res.end(body);
@@ -715,21 +726,19 @@ const server = createServer(async (req, res) => {
   if (method === "DELETE" && pathname === "/_cy/plugin") return sendJson(res, 200, { ok: true });
   if (method === "POST" && pathname === "/_cy/resync") return sendJson(res, 200, { started: false });
 
-  if (method === "GET" && pathname === `${ADMINER_MOUNT}/_cy/session-debug`) {
+  if (method === "GET" && (pathname === "/_cy/session-debug" || pathname === `${ADMINER_MOUNT}/_cy/session-debug`)) {
     const publicBase = getPublicBase(req, url);
     const sessionKey = resolveSessionKey(req, url.search, undefined, publicBase.path);
     return sendJson(res, 200, {
       sessionKey: sessionKey || null,
+      sessionParam: sessionKey ? publicSessionParam(sessionKey) : null,
       incomingCookie: req.headers.cookie ?? null,
+      storedCookie: sessionKey ? adminerSessions.get(sessionKey)?.cookieHeader ?? null : null,
       hasStoredSession: sessionKey ? adminerSessions.has(sessionKey) : false,
       storedSessionCount: adminerSessions.size,
       referer: req.headers.referer ?? req.headers.referrer ?? null,
       query: url.search || null,
     });
-  }
-
-  if (method === "GET" && (pathname === "/" || pathname === "")) {
-    return sendAdminerShell(res);
   }
 
   const body = await readRequestBody(req);

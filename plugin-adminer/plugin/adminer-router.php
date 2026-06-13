@@ -24,4 +24,11 @@ session_set_cookie_params([
 ini_set('session.use_trans_sid', '1');
 ini_set('session.use_only_cookies', '0');
 
+// Node proxy injects Adminer session via headers (browser cookies are unreliable in cross-site iframes).
+foreach (['adminer_sid' => 'HTTP_X_CY_ADMINER_SID', 'adminer_key' => 'HTTP_X_CY_ADMINER_KEY'] as $cookie => $header) {
+    if (!empty($_SERVER[$header])) {
+        $_COOKIE[$cookie] = $_SERVER[$header];
+    }
+}
+
 require __DIR__ . '/adminer.php';
