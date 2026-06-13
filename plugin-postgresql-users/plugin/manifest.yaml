@@ -3,11 +3,41 @@ icon: "https://cycloid-demo-stacks-logo.s3.eu-west-1.amazonaws.com/postgresql.sv
 
 configuration:
   - name: "Database URL"
-    description: "PostgreSQL connection URL (postgresql://user:password@host:5432/database). If DNS fails in the plugin container, use the server IP with ?sslmode=require and set Database SSL server name."
+    description: "PostgreSQL connection URL (postgresql://user:password@host:5432/database). If the CLI truncates at @, use %40 instead of @, omit ?sslmode=require, or use the split fields below."
     key: database_url
     widget: simple_text
     type: string
-    required: true
+    required: false
+  - name: "Database host"
+    description: "Alternative to database_url when the URL is truncated by the CLI (e.g. 20.71.29.144)."
+    key: database_host
+    widget: simple_text
+    type: string
+    required: false
+  - name: "Database port"
+    description: "PostgreSQL port (default 5432)."
+    key: database_port
+    widget: simple_text
+    type: string
+    required: false
+  - name: "Database user"
+    description: "PostgreSQL login user."
+    key: database_user
+    widget: simple_text
+    type: string
+    required: false
+  - name: "Database password"
+    description: "PostgreSQL login password."
+    key: database_password
+    widget: simple_text
+    type: string
+    required: false
+  - name: "Database name"
+    description: "PostgreSQL database name."
+    key: database_name
+    widget: simple_text
+    type: string
+    required: false
   - name: "Database SSL server name"
     description: "TLS SNI hostname when database_url uses an IP address (DNS workaround). Example: demopostgres99.postgres.database.azure.com"
     key: database_ssl_servername

@@ -9,7 +9,7 @@ import {
   type DbTarget,
 } from "./network-diagnostics.ts";
 
-const PLUGIN_VERSION = "2.2.4";
+const PLUGIN_VERSION = "2.2.6";
 
 const APP_ROLES = ["readonly", "readwrite", "admin"] as const;
 type AppRole = (typeof APP_ROLES)[number];
@@ -62,7 +62,7 @@ type PgUserRow = {
   canCreateRole: boolean;
 };
 
-if (!DATABASE_URL) {
+if (!DATABASE_URL && !configEnv("database_host")) {
   console.warn("[WARN] DATABASE_URL is not set — set database_url at plugin install time");
 } else {
   try {
@@ -298,8 +298,17 @@ function sslModeFromUrl(value: string): string | null {
   return null;
 }
 
+function normalizeDatabaseUrlInput(value: string): string {
+  let trimmed = unwrapConfigValue(value);
+  if (!trimmed.includes("@")) {
+    // Some CLI/API pipelines drop @ or encode it as %40 between credentials and host.
+    trimmed = trimmed.replace(/^(postgres(?:ql)?:\/\/[^:/?#]+:[^/?#]*)%40/i, "$1@");
+  }
+  return trimmed;
+}
+
 function parseDatabaseUrl(value: string): DbConfig | null {
-  const trimmed = unwrapConfigValue(value);
+  const trimmed = normalizeDatabaseUrlInput(value);
   if (!trimmed) return null;
 
   const normalized = trimmed.replace(/^postgres:\/\//, "postgresql://");
@@ -367,19 +376,39 @@ function parseDatabaseUrl(value: string): DbConfig | null {
   }
 }
 
+function configEnv(name: string): string {
+  const upper = name.toUpperCase();
+  const lower = name.toLowerCase();
+  return process.env[upper]?.trim() || process.env[lower]?.trim() || "";
+}
+
+function resolveDbConfigFromParts(): DbConfig | null {
+  const host = configEnv("database_host");
+  const username = configEnv("database_user");
+  const password = configEnv("database_password");
+  const database = configEnv("database_name") || "postgres";
+  const port = configEnv("database_port") || "5432";
+  if (!host || !username || !password) return null;
+  return {
+    host,
+    port,
+    username,
+    password,
+    database,
+    ssl: wantsSsl(host, null),
+  };
+}
+
 function resolveDbConfig(): DbConfig {
-  if (!DATABASE_URL) {
-    throw new Error(
-      "DATABASE_URL is not configured. Set database_url at plugin install time (postgresql://user:password@host:5432/database).",
-    );
-  }
-  const db = parseDatabaseUrl(DATABASE_URL);
+  let db = DATABASE_URL ? parseDatabaseUrl(DATABASE_URL) : null;
+  if (!db) db = resolveDbConfigFromParts();
   if (!db) {
-    const hint = DATABASE_URL.includes("@")
+    const hint = DATABASE_URL.includes("@") || DATABASE_URL.includes("%40")
       ? ""
-      : " The value looks truncated (missing @host) — use single quotes when passing database_url on the CLI.";
+      : " The database_url value looks truncated (missing @host). Use the Cycloid UI, quote the URL on the CLI, use %40 instead of @, or set database_host/user/password/name separately.";
     throw new Error(
-      "Invalid database_url. Expected postgresql://user:password@host:5432/database" + hint,
+      "Invalid database configuration. Expected database_url=postgresql://user:password@host:5432/database" +
+        hint,
     );
   }
   if (DATABASE_SSL_SERVERNAME) {
