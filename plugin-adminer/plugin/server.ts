@@ -1,6 +1,7 @@
 import { createServer, type IncomingMessage, type IncomingHttpHeaders, type ServerResponse } from "node:http";
 import { request as httpRequest } from "node:http";
 import { randomBytes } from "node:crypto";
+import { readFileSync, writeFileSync } from "node:fs";
 
 const port = Number(process.env.PORT);
 if (!Number.isFinite(port) || port <= 0) {
@@ -12,11 +13,48 @@ const ADMINER_PORT = process.env.ADMINER_PORT?.trim() || "8081";
 const ADMINER_MOUNT = "/adminer";
 const SESSION_TTL_MS = 24 * 60 * 60 * 1000;
 const MAX_INTERNAL_REDIRECTS = 5;
+const SESSION_STORE_FILE = process.env.CY_ADMINER_SESSION_FILE?.trim() || "/tmp/cy-adminer-sessions.json";
 
 /** Cycloid may not forward browser Cookie headers to the plugin; bridge Adminer sessions in-process. */
 const adminerSessions = new Map<string, { cookieHeader: string; updatedAt: number }>();
 /** Short _cy_sk token → canonical widget iframe path (avoids multi-KB query strings). */
 const shortSessionKeys = new Map<string, string>();
+
+function loadPersistedSessions(): void {
+  try {
+    const raw = readFileSync(SESSION_STORE_FILE, "utf8");
+    const data = JSON.parse(raw) as {
+      sessions?: Record<string, { cookieHeader: string; updatedAt: number }>;
+      shortKeys?: Record<string, string>;
+    };
+    const now = Date.now();
+    for (const [key, entry] of Object.entries(data.sessions ?? {})) {
+      if (now - entry.updatedAt <= SESSION_TTL_MS) adminerSessions.set(key, entry);
+    }
+    for (const [short, full] of Object.entries(data.shortKeys ?? {})) {
+      if (isCanonicalKey(full)) shortSessionKeys.set(short, full);
+    }
+    console.log(`[INFO] loaded ${adminerSessions.size} adminer session(s) from disk`);
+  } catch {
+    /* no persisted sessions yet */
+  }
+}
+
+function persistSessions(): void {
+  try {
+    writeFileSync(
+      SESSION_STORE_FILE,
+      JSON.stringify({
+        sessions: Object.fromEntries(adminerSessions),
+        shortKeys: Object.fromEntries(shortSessionKeys),
+      }),
+    );
+  } catch (err) {
+    console.log(`[WARN] failed to persist adminer sessions: ${(err as Error).message}`);
+  }
+}
+
+loadPersistedSessions();
 
 /** Strip /adminer suffix, JWT segment, and widget id — stable per component. */
 function stableWidgetPath(path: string): string {
@@ -200,9 +238,14 @@ function adminerSessionKey(req: IncomingMessage, search = "", body?: Buffer): st
 
 function pruneAdminerSessions(): void {
   const now = Date.now();
+  let pruned = false;
   for (const [key, session] of adminerSessions) {
-    if (now - session.updatedAt > SESSION_TTL_MS) adminerSessions.delete(key);
+    if (now - session.updatedAt > SESSION_TTL_MS) {
+      adminerSessions.delete(key);
+      pruned = true;
+    }
   }
+  if (pruned) persistSessions();
 }
 
 function isAdminerCookie(name: string): boolean {
@@ -253,12 +296,14 @@ function saveAdminerSessionFromCookies(key: string, setCookies: string[]): void 
     const sid = incoming.get("adminer_sid");
     if (sid) adminerSessions.set(`sid:${sid}`, entry);
     relinkShortTokens(key, sid);
+    persistSessions();
     return;
   }
 
   if (key && !key.startsWith("sid:")) adminerSessions.set(key, entry);
   const sid = incoming.get("adminer_sid");
   if (sid) adminerSessions.set(`sid:${sid}`, entry);
+  persistSessions();
 }
 
 /** Map Adminer Location (relative or absolute) to upstream path on 127.0.0.1. */
@@ -382,10 +427,12 @@ function stripCySessionFromBody(body: Buffer): Buffer {
   return Buffer.from(cleaned, "utf8");
 }
 
-function stripCySessionParam(search: string): string {
+const PROXY_QUERY_PARAMS = new Set(["_cy_sk", "org", "project", "env", "component", "secret"]);
+
+function stripPluginQueryParams(search: string): string {
   if (!search) return "";
   const params = new URLSearchParams(search.startsWith("?") ? search.slice(1) : search);
-  params.delete("_cy_sk");
+  for (const key of PROXY_QUERY_PARAMS) params.delete(key);
   const qs = params.toString();
   return qs ? `?${qs}` : "";
 }
@@ -605,9 +652,10 @@ function filterProxyResponseHeaders(
     out[key] = value;
   }
 
-  if (publicBasePath) {
+  const baseForCookie = publicBasePath || (isCanonicalKey(sessionKey) ? sessionKey : "");
+  if (baseForCookie) {
     const existing = out["set-cookie"];
-    const baseCookie = buildCyAdminerBaseCookie(publicBasePath);
+    const baseCookie = buildCyAdminerBaseCookie(baseForCookie);
     out["set-cookie"] = existing
       ? [...(Array.isArray(existing) ? existing : [existing]), baseCookie]
       : baseCookie;
@@ -644,7 +692,7 @@ function injectIframeFixes(html: string, publicBase: { href: string; path: strin
 
   const skParam = sessionKey ? publicSessionParam(sessionKey) : "";
   const skScript = skParam
-    ? `<script>(function(){if(location.search.includes("_cy_sk="))return;try{var u=new URL(location.href);u.searchParams.set("_cy_sk","${skParam}");location.replace(u.pathname+u.search+u.hash)}catch(e){}})();</script>`
+    ? `<script>(function(){var s="${skParam}";try{var u=new URL(location.href);var k=u.searchParams.get("_cy_sk");if(k===s)return;if(!k||k.charAt(0)==="/"){u.searchParams.set("_cy_sk",s);location.replace(u.pathname+u.search+u.hash)}}catch(e){}})();</script>`
     : "";
 
   const script = skScript + IFRAME_CLIENT_SCRIPT;
@@ -697,7 +745,7 @@ function respondAdminerUpstream(
   const stored = ctx.sessionKey ? adminerSessions.get(ctx.sessionKey) : undefined;
   const cookieNames = stored ? [...parseCookieHeader(stored.cookieHeader).keys()].join(",") : "-";
   responseHeaders["x-cy-adminer-debug"] =
-    `key=${ctx.sessionKey || "-"} sk=${isCanonicalKey(ctx.sessionKey) ? publicSessionParam(ctx.sessionKey) : "-"} bridged=${ctx.bridged} stored=${Boolean(stored)} cookies=${cookieNames} redirects=${ctx.redirectCount}`;
+    `${ctx.sessionKey || "-"}|${isCanonicalKey(ctx.sessionKey) ? publicSessionParam(ctx.sessionKey) : "-"}|bridged=${ctx.bridged}|stored=${Boolean(stored)}|cookies=${cookieNames}|redirects=${ctx.redirectCount}`;
 
   const statusCode =
     internalizedRedirect && (upstreamRes.statusCode ?? 0) >= 300 && (upstreamRes.statusCode ?? 0) < 400
@@ -794,7 +842,7 @@ function proxyAdminer(
   body: Buffer | undefined,
 ): void {
   const adminerPath = toAdminerPath(pathname);
-  const targetPath = `${adminerPath}${stripCySessionParam(search)}`;
+  const targetPath = `${adminerPath}${stripPluginQueryParams(search)}`;
   const publicBase = getPublicBase(req, requestUrl);
   const sessionKey = resolveSessionKey(req, search, body, publicBase.path);
   pruneAdminerSessions();
