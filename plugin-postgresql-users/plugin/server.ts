@@ -9,7 +9,7 @@ import {
   type DbTarget,
 } from "./network-diagnostics.ts";
 
-const PLUGIN_VERSION = "2.1.3";
+const PLUGIN_VERSION = "2.2.0";
 
 const APP_ROLES = ["readonly", "readwrite", "admin"] as const;
 type AppRole = (typeof APP_ROLES)[number];
@@ -662,6 +662,11 @@ function renderUsersPage(users: PgUserRow[], syncedAt: string, error = ""): stri
     .diag pre { margin: 0.75rem 0 0; padding: 0.75rem; background: #0f172a; color: #e2e8f0; border-radius: 8px; overflow: auto; font-size: 0.75rem; line-height: 1.4; max-height: 420px; white-space: pre-wrap; word-break: break-word; }
     .diag-actions { margin-top: 0.5rem; display: flex; gap: 0.5rem; }
     .diag-actions button { font: inherit; font-size: 0.8125rem; padding: 0.35rem 0.65rem; border-radius: 6px; border: 1px solid #c5cee0; background: #fff; cursor: pointer; }
+    .toolbar { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: end; margin-bottom: 1rem; padding: 0.875rem 1rem; background: #fff; border: 1px solid #d8deea; border-radius: 10px; }
+    .toolbar label { display: flex; flex-direction: column; gap: 0.25rem; font-size: 0.75rem; color: #5c677f; }
+    .toolbar input, .toolbar select { font: inherit; font-size: 0.875rem; padding: 0.4rem 0.55rem; border: 1px solid #c5cee0; border-radius: 6px; min-width: 10rem; }
+    .btn { font: inherit; font-size: 0.875rem; padding: 0.45rem 0.85rem; border-radius: 6px; border: 1px solid #c5cee0; background: #fff; cursor: pointer; }
+    .btn-primary { background: #1a6fb5; border-color: #1a6fb5; color: #fff; }
   </style>
 </head>
 <body>
@@ -669,6 +674,18 @@ function renderUsersPage(users: PgUserRow[], syncedAt: string, error = ""): stri
     <h1>PostgreSQL users</h1>
     <p class="muted">Read-only list of application login roles</p>
     ${errorBlock}
+    <form id="add-user-form" class="toolbar">
+      <label>Username<input name="username" required pattern="[a-z][a-z0-9_]*" autocomplete="off" /></label>
+      <label>Password<input name="password" type="password" required minlength="8" autocomplete="new-password" /></label>
+      <label>Application role
+        <select name="appRole">
+          <option value="readonly">readonly</option>
+          <option value="readwrite" selected>readwrite</option>
+          <option value="admin">admin</option>
+        </select>
+      </label>
+      <button type="submit" class="btn btn-primary">Add user</button>
+    </form>
     <div class="card">
       <table>
         <thead>
@@ -797,6 +814,34 @@ function renderUsersShell(instantReport: ReturnType<typeof buildInstantDiagnosti
     showDiagnostics(embeddedDiagnostics);
   } finally {
     clearTimeout(timeout);
+  }
+
+  const addForm = document.getElementById("add-user-form");
+  if (addForm) {
+    addForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const form = event.currentTarget;
+      const submitBtn = form.querySelector('button[type="submit"]');
+      if (submitBtn) submitBtn.disabled = true;
+      try {
+        const apiUrl = await pluginApiUrl("/api/users");
+        const res = await fetch(apiUrl, {
+          method: "POST",
+          headers: { "content-type": "application/json", accept: "application/json" },
+          body: JSON.stringify({
+            username: form.username.value.trim(),
+            password: form.password.value,
+            appRole: form.appRole.value,
+          }),
+        });
+        const data = await res.json().catch(() => null);
+        if (!res.ok) throw new Error((data && data.error) || ("HTTP " + res.status));
+        location.reload();
+      } catch (err) {
+        if (alertEl) { alertEl.hidden = false; alertEl.textContent = err.message || String(err); }
+        if (submitBtn) submitBtn.disabled = false;
+      }
+    });
   }
 })();
 </script>`;
