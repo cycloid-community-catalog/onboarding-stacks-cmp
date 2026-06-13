@@ -53,27 +53,34 @@ function parseRequestUrl(req: IncomingMessage): URL {
   }
 }
 
+function normalizeSlashes(pathname: string): string {
+  const collapsed = pathname.replace(/\/+/g, "/");
+  if (collapsed.length > 1 && collapsed.endsWith("/")) return collapsed.slice(0, -1);
+  return collapsed || "/";
+}
+
 function normalizePluginPath(pathname: string): string {
-  const iframeIdx = pathname.indexOf("/iframe");
+  const path = normalizeSlashes(pathname || "/");
+  const iframeIdx = path.indexOf("/iframe");
   if (iframeIdx >= 0) {
-    const rest = pathname.slice(iframeIdx + "/iframe".length);
+    const rest = path.slice(iframeIdx + "/iframe".length);
     if (!rest || rest === "/") return "/";
     return rest.startsWith("/") ? rest : `/${rest}`;
   }
-  const widgetMatch = /\/plugin_widgets\/\d+\/[^/]+/.exec(pathname);
+  const widgetMatch = /\/plugin_widgets\/\d+\/[^/]+/.exec(path);
   if (widgetMatch) {
-    const rest = pathname.slice(widgetMatch.index + widgetMatch[0].length);
+    const rest = path.slice(widgetMatch.index + widgetMatch[0].length);
     if (!rest || rest === "/") return "/";
     return rest.startsWith("/") ? rest : `/${rest}`;
   }
-  return pathname || "/";
+  return path;
 }
 
 function resolvePathname(url: URL, rawPathname: string): string {
   const proxyPath = url.searchParams.get("path")?.trim();
   if (proxyPath) {
     const normalized = proxyPath.startsWith("/") ? proxyPath : `/${proxyPath}`;
-    return normalized.replace(/\/$/, "") || "/";
+    return normalizePluginPath(normalized);
   }
   return normalizePluginPath(rawPathname);
 }
@@ -302,90 +309,6 @@ function renderUsersPage(users: PgUserRow[], syncedAt: string, error = ""): stri
 </html>`;
 }
 
-function iframeFetchHelper(): string {
-  return `
-function __pluginFetchUrl(subPath) {
-  const path = window.location.pathname.replace(/\\/$/, "");
-  let base = path;
-  const idx = path.indexOf("/iframe");
-  if (idx >= 0) {
-    base = path.slice(0, idx + "/iframe".length);
-  } else {
-    const m = /^(.*\\/plugin_widgets\\/\\d+\\/[^/]+)/.exec(path);
-    if (m) base = m[1] + "/iframe";
-  }
-  const sub = subPath.startsWith("/") ? subPath : ("/" + subPath);
-  return base + sub;
-}
-function __pluginError(data, status) {
-  if (data && data.error) return data.error;
-  return "HTTP " + status;
-}
-async function __pluginFetch(subPath) {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 20000);
-  try {
-    const res = await fetch(__pluginFetchUrl(subPath), {
-      headers: { accept: "application/json" },
-      signal: controller.signal,
-    });
-    const text = await res.text();
-    let data = null;
-    try { data = text ? JSON.parse(text) : null; } catch { throw new Error(text.slice(0, 240) || ("HTTP " + res.status)); }
-    if (!res.ok) throw new Error(__pluginError(data, res.status));
-    return data;
-  } catch (err) {
-    if (err.name === "AbortError") throw new Error("Request timed out after 20s. Check database_url and network access to PostgreSQL.");
-    throw err;
-  } finally {
-    clearTimeout(timeout);
-  }
-}`;
-}
-
-function renderUsersShell(): string {
-  const page = renderUsersPage([], "", "").replace(
-    `<tbody id="users-body"><tr><td colspan="7" class="muted">No application users found.</td></tr></tbody>`,
-    `<tbody id="users-body"><tr><td colspan="7" class="muted">Loading users…</td></tr></tbody>`,
-  );
-
-  const script = `
-${iframeFetchHelper()}
-(async () => {
-  const alertEl = document.getElementById("alert");
-  const bodyEl = document.getElementById("users-body");
-  try {
-    const data = await __pluginFetch("/api/users");
-    if (alertEl) alertEl.hidden = true;
-    const users = data.users || [];
-    const syncedAt = data.syncedAt || "";
-    if (users.length === 0) {
-      bodyEl.innerHTML = '<tr><td colspan="7" class="muted">No application users found.</td></tr>';
-      return;
-    }
-    bodyEl.innerHTML = users.map((user) => \`
-      <tr>
-        <td>\${user.username}</td>
-        <td>\${user.appRole}</td>
-        <td>\${user.roles}</td>
-        <td>\${user.isSuperuser ? "yes" : "no"}</td>
-        <td>\${user.canCreateDb ? "yes" : "no"}</td>
-        <td>\${user.canCreateRole ? "yes" : "no"}</td>
-        <td>\${syncedAt}</td>
-      </tr>\`).join("");
-  } catch (err) {
-    if (alertEl) {
-      alertEl.hidden = false;
-      alertEl.textContent = err.message || String(err);
-    }
-    bodyEl.innerHTML = '<tr><td colspan="7" class="muted">Failed to load users.</td></tr>';
-  }
-})();
-</script>`;
-
-  return page.replace("</body>", `<script>${script}</script></body>`);
-}
-
 async function handleUsersApi(res: ServerResponse): Promise<void> {
   try {
     const { users, syncedAt } = await fetchUsers();
@@ -413,7 +336,7 @@ const server = createServer((req, res) => {
   res.on("finish", () => {
     const ms = Date.now() - start;
     const level = res.statusCode >= 500 ? "ERROR" : res.statusCode >= 400 ? "WARN" : "INFO";
-    console.log(`[${level}] ${method} ${pathname} → ${res.statusCode} (${ms}ms)`);
+    console.log(`[${level}] ${method} ${pathname} → ${res.statusCode} (${ms}ms) req=${req.url ?? "-"}`);
   });
 
   if (method === "GET" && pathname === "/_cy/ping") return send(res, 200, { ok: true });
@@ -426,7 +349,11 @@ const server = createServer((req, res) => {
   }
 
   if (method === "GET" && (pathname === "/" || pathname === "/index.html" || pathname === "/ui/users")) {
-    send(res, 200, renderUsersShell(), "text/html; charset=utf-8");
+    fetchUsers()
+      .then(({ users, syncedAt }) => send(res, 200, renderUsersPage(users, syncedAt), "text/html; charset=utf-8"))
+      .catch((err) =>
+        send(res, 200, renderUsersPage([], "", (err as Error).message), "text/html; charset=utf-8"),
+      );
     return;
   }
 
