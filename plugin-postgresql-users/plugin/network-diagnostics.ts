@@ -23,9 +23,32 @@ export type DiagnosticStep = {
 export type NetworkDiagnosticsReport = {
   generatedAt: string;
   pluginVersion: string;
+  mode: "quick" | "full";
   summary: string;
+  note?: string;
   target: Record<string, unknown> | null;
   steps: DiagnosticStep[];
+};
+
+export type DiagnosticOptions = {
+  mode: "quick" | "full";
+  tcpTimeoutMs: number;
+  httpTimeoutMs: number;
+  includePostgresConnect: boolean;
+};
+
+export const QUICK_DIAGNOSTIC_OPTIONS: DiagnosticOptions = {
+  mode: "quick",
+  tcpTimeoutMs: 3_000,
+  httpTimeoutMs: 3_000,
+  includePostgresConnect: false,
+};
+
+export const FULL_DIAGNOSTIC_OPTIONS: DiagnosticOptions = {
+  mode: "full",
+  tcpTimeoutMs: 10_000,
+  httpTimeoutMs: 8_000,
+  includePostgresConnect: true,
 };
 
 function elapsed(start: number): number {
@@ -169,14 +192,24 @@ function buildSummary(steps: DiagnosticStep[]): string {
   return `Failed steps: ${names}`;
 }
 
+async function runOptionalStep(
+  step: string,
+  enabled: boolean,
+  fn: () => Promise<DiagnosticStep>,
+): Promise<DiagnosticStep | null> {
+  if (!enabled) return null;
+  return fn();
+}
+
 export async function runNetworkDiagnostics(
   pluginVersion: string,
   db: DbTarget | null,
-  pgConnect?: () => Promise<Record<string, unknown>>,
+  pgConnect: (() => Promise<Record<string, unknown>>) | undefined,
+  options: DiagnosticOptions,
 ): Promise<NetworkDiagnosticsReport> {
+  const { mode, tcpTimeoutMs, httpTimeoutMs, includePostgresConnect } = options;
+  const quick = mode === "quick";
   const steps: DiagnosticStep[] = [];
-  const tcpTimeoutMs = 10_000;
-  const httpTimeoutMs = 8_000;
 
   steps.push(
     await runStep("container.info", async () => ({
@@ -215,60 +248,58 @@ export async function runNetworkDiagnostics(
     }),
   );
 
+  const parallelSteps: Promise<DiagnosticStep>[] = [];
+
   if (db) {
-    steps.push(
-      await runStep("dns.lookup", async () => {
+    parallelSteps.push(
+      runStep("dns.lookup", async () => {
         const lookup = await dns.lookup(db.host, { all: true, verbatim: true });
         return { details: { host: db.host, records: lookup } };
       }),
     );
+  }
 
-    steps.push(
-      await runStep("dns.resolve4", async () => {
-        try {
-          const addresses = await dns.resolve4(db.host);
-          return { details: { host: db.host, addresses } };
-        } catch (err) {
-          const code = err && typeof err === "object" && "code" in err ? String(err.code) : "";
-          if (code === "ENODATA" || code === "ENOTFOUND") {
-            return { status: "warn", details: { host: db.host, message: (err as Error).message } };
-          }
-          throw err;
-        }
-      }),
-    );
+  parallelSteps.push(
+    runStep("network.interfaces", async () => ({
+      details: { interfaces: os.networkInterfaces() },
+    })),
+    runStep("egress.http_ipify", async () => ({
+      details: await fetchJson("https://api.ipify.org?format=json", httpTimeoutMs),
+    })),
+    runStep("tcp.control_cloudflare_443", async () => ({
+      details: await tcpConnect("1.1.1.1", 443, tcpTimeoutMs),
+    })),
+    runStep("tcp.control_google_dns_53", async () => ({
+      details: await tcpConnect("8.8.8.8", 53, tcpTimeoutMs),
+    })),
+  );
 
-    steps.push(
-      await runStep("dns.resolve6", async () => {
-        try {
-          const addresses = await dns.resolve6(db.host);
-          return { details: { host: db.host, addresses } };
-        } catch (err) {
-          const code = err && typeof err === "object" && "code" in err ? String(err.code) : "";
-          if (code === "ENODATA" || code === "ENOTFOUND") {
-            return { status: "warn", details: { host: db.host, message: (err as Error).message } };
-          }
-          throw err;
-        }
-      }),
+  if (db) {
+    parallelSteps.push(
+      runStep("tcp.postgres", async () => ({
+        details: {
+          host: db.host,
+          port: Number(db.port),
+          ...(await tcpConnect(db.host, Number(db.port), tcpTimeoutMs)),
+        },
+      })),
     );
+    if (db.ssl) {
+      parallelSteps.push(
+        runStep("tls.postgres", async () => ({
+          details: {
+            host: db.host,
+            port: Number(db.port),
+            ...(await tlsConnect(db.host, Number(db.port), tcpTimeoutMs)),
+          },
+        })),
+      );
+    }
+  }
 
-    steps.push(
-      await runStep("dns.reverse", async () => {
-        const lookup = await dns.lookup(db.host, { verbatim: true });
-        const address = typeof lookup === "string" ? lookup : lookup.address;
-        try {
-          const hostnames = await dns.reverse(address);
-          return { details: { address, hostnames } };
-        } catch (err) {
-          return {
-            status: "warn",
-            details: { address, message: (err as Error).message },
-          };
-        }
-      }),
-    );
-  } else {
+  steps.push(...(await Promise.all(parallelSteps)));
+
+  if (!db) {
     steps.push({
       step: "dns.target",
       status: "skip",
@@ -277,74 +308,76 @@ export async function runNetworkDiagnostics(
     });
   }
 
-  steps.push(
-    await runStep("network.interfaces", async () => ({
-      details: { interfaces: os.networkInterfaces() },
-    })),
-  );
-
-  steps.push(
-    await runStep("egress.http_ipify", async () => ({
-      details: await fetchJson("https://api.ipify.org?format=json", httpTimeoutMs),
-    })),
-  );
-
-  steps.push(
-    await runStep("egress.http_cloudflare", async () => ({
-      details: await fetchJson("https://1.1.1.1/cdn-cgi/trace", httpTimeoutMs),
-    })),
-  );
-
-  steps.push(
-    await runStep("tcp.control_cloudflare_443", async () => ({
-      details: await tcpConnect("1.1.1.1", 443, tcpTimeoutMs),
-    })),
-  );
-
-  steps.push(
-    await runStep("tcp.control_google_dns_53", async () => ({
-      details: await tcpConnect("8.8.8.8", 53, tcpTimeoutMs),
-    })),
-  );
-
-  if (db) {
-    steps.push(
-      await runStep("tcp.postgres", async () => ({
-        details: {
-          host: db.host,
-          port: Number(db.port),
-          ...(await tcpConnect(db.host, Number(db.port), tcpTimeoutMs)),
-        },
-      })),
-    );
-
-    if (db.ssl) {
-      steps.push(
-        await runStep("tls.postgres", async () => ({
-          details: {
-            host: db.host,
-            port: Number(db.port),
-            ...(await tlsConnect(db.host, Number(db.port), tcpTimeoutMs)),
-          },
+  if (!quick && db) {
+    const extraSteps = await Promise.all([
+      runOptionalStep("dns.resolve4", true, () =>
+        runStep("dns.resolve4", async () => {
+          try {
+            const addresses = await dns.resolve4(db.host);
+            return { details: { host: db.host, addresses } };
+          } catch (err) {
+            const code = err && typeof err === "object" && "code" in err ? String(err.code) : "";
+            if (code === "ENODATA" || code === "ENOTFOUND") {
+              return { status: "warn", details: { host: db.host, message: (err as Error).message } };
+            }
+            throw err;
+          }
+        }),
+      ),
+      runOptionalStep("dns.resolve6", true, () =>
+        runStep("dns.resolve6", async () => {
+          try {
+            const addresses = await dns.resolve6(db.host);
+            return { details: { host: db.host, addresses } };
+          } catch (err) {
+            const code = err && typeof err === "object" && "code" in err ? String(err.code) : "";
+            if (code === "ENODATA" || code === "ENOTFOUND") {
+              return { status: "warn", details: { host: db.host, message: (err as Error).message } };
+            }
+            throw err;
+          }
+        }),
+      ),
+      runOptionalStep("dns.reverse", true, () =>
+        runStep("dns.reverse", async () => {
+          const lookup = await dns.lookup(db.host, { verbatim: true });
+          const address = typeof lookup === "string" ? lookup : lookup.address;
+          try {
+            const hostnames = await dns.reverse(address);
+            return { details: { address, hostnames } };
+          } catch (err) {
+            return {
+              status: "warn",
+              details: { address, message: (err as Error).message },
+            };
+          }
+        }),
+      ),
+      runOptionalStep("egress.http_cloudflare", true, () =>
+        runStep("egress.http_cloudflare", async () => ({
+          details: await fetchJson("https://1.1.1.1/cdn-cgi/trace", httpTimeoutMs),
         })),
-      );
-    } else {
-      steps.push({
-        step: "tls.postgres",
-        status: "skip",
-        durationMs: 0,
-        details: { message: "SSL not enabled for target host" },
-      });
-    }
-
-    if (pgConnect) {
-      steps.push(
-        await runStep("postgres.connect", async () => ({
-          details: await pgConnect(),
+      ),
+      runOptionalStep("postgres.connect", includePostgresConnect && !!pgConnect, () =>
+        runStep("postgres.connect", async () => ({
+          details: await pgConnect!(),
         })),
-      );
-    }
-  } else {
+      ),
+    ]);
+    steps.push(...extraSteps.filter((step): step is DiagnosticStep => step !== null));
+  } else if (db) {
+    steps.push({
+      step: "postgres.connect",
+      status: "skip",
+      durationMs: 0,
+      details: {
+        message:
+          "Skipped in quick mode to stay within Cycloid proxy timeout. Full report is written to plugin logs.",
+      },
+    });
+  }
+
+  if (!db) {
     steps.push({
       step: "tcp.postgres",
       status: "skip",
@@ -356,7 +389,11 @@ export async function runNetworkDiagnostics(
   const report: NetworkDiagnosticsReport = {
     generatedAt: new Date().toISOString(),
     pluginVersion,
+    mode,
     summary: buildSummary(steps),
+    note: quick
+      ? "Quick report (≤4s). Full diagnostics including postgres.connect are logged asynchronously — run: cy plugin logs cycloid-plugin-postgresql-users | grep NETWORK-DIAG"
+      : undefined,
     target: redactTarget(db),
     steps,
   };
@@ -366,7 +403,7 @@ export async function runNetworkDiagnostics(
 
 export function formatReportForLogs(report: NetworkDiagnosticsReport): string {
   const lines = [
-    `[NETWORK-DIAG] generatedAt=${report.generatedAt} version=${report.pluginVersion}`,
+    `[NETWORK-DIAG] generatedAt=${report.generatedAt} version=${report.pluginVersion} mode=${report.mode}`,
     `[NETWORK-DIAG] summary=${report.summary}`,
     `[NETWORK-DIAG] target=${JSON.stringify(report.target)}`,
   ];

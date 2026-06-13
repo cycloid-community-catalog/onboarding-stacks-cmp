@@ -2,11 +2,13 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import pg from "pg";
 import {
   formatReportForLogs,
+  FULL_DIAGNOSTIC_OPTIONS,
+  QUICK_DIAGNOSTIC_OPTIONS,
   runNetworkDiagnostics,
   type DbTarget,
 } from "./network-diagnostics.ts";
 
-const PLUGIN_VERSION = "2.0.4";
+const PLUGIN_VERSION = "2.0.5";
 
 const port = Number(process.env.PORT);
 if (!Number.isFinite(port) || port <= 0) {
@@ -226,7 +228,7 @@ async function testPostgresConnection(db: DbConfig): Promise<Record<string, unkn
   };
 }
 
-async function buildNetworkDiagnosticsReport() {
+async function buildNetworkDiagnosticsReport(quick = true) {
   let dbConfig: DbConfig | null = null;
   try {
     dbConfig = resolveDbConfig();
@@ -234,10 +236,12 @@ async function buildNetworkDiagnosticsReport() {
     dbConfig = null;
   }
   const target = resolveDbTarget();
+  const options = quick ? QUICK_DIAGNOSTIC_OPTIONS : FULL_DIAGNOSTIC_OPTIONS;
   const report = await runNetworkDiagnostics(
     PLUGIN_VERSION,
     target,
     dbConfig ? () => testPostgresConnection(dbConfig!) : undefined,
+    options,
   );
   console.log(formatReportForLogs(report));
   return report;
@@ -439,13 +443,19 @@ function renderUsersShell(): string {
   const diagRefresh = document.getElementById("diag-refresh");
   let lastDiagnostics = null;
 
+  async function pluginApiUrl(path) {
+    const url = new URL(window.location.href);
+    url.searchParams.set("path", path);
+    return url.href;
+  }
+
   async function runDiagnostics() {
     if (!diagPanel || !diagOutput) return;
     diagPanel.hidden = false;
     diagOutput.textContent = "Running diagnostics…";
-    const apiUrl = new URL("api/network-diagnostics", window.location.href).href;
+    const apiUrl = await pluginApiUrl("/api/network-diagnostics");
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 60000);
+    const timeout = setTimeout(() => controller.abort(), 15000);
     try {
       const res = await fetch(apiUrl, { headers: { accept: "application/json" }, signal: controller.signal });
       const text = await res.text();
@@ -469,7 +479,7 @@ function renderUsersShell(): string {
   }
   if (diagRefresh) diagRefresh.addEventListener("click", () => { runDiagnostics(); });
 
-  const apiUrl = new URL("api/users", window.location.href).href;
+  const apiUrl = await pluginApiUrl("/api/users");
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 20000);
   try {
@@ -513,12 +523,16 @@ function renderUsersShell(): string {
 
 async function handleNetworkDiagnostics(res: ServerResponse): Promise<void> {
   try {
-    const report = await buildNetworkDiagnosticsReport();
+    const report = await buildNetworkDiagnosticsReport(true);
     res.writeHead(200, {
       "content-type": "application/json",
       "x-cy-network-diagnostics-summary": report.summary.slice(0, 500),
+      "x-cy-network-diagnostics-mode": report.mode,
     });
     res.end(JSON.stringify(report, null, 2));
+    void buildNetworkDiagnosticsReport(false).catch((err) =>
+      console.error("[NETWORK-DIAG] full report failed:", (err as Error).message),
+    );
   } catch (err) {
     send(res, 500, { error: (err as Error).message });
   }
