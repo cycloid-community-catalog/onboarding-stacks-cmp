@@ -81,7 +81,19 @@ function mergeAdminerCookies(existing: string | undefined, stored: string): stri
 }
 
 function applyStoredAdminerSession(req: IncomingMessage, key: string): boolean {
-  if (!key) return false;
+  if (key && applyStoredAdminerSessionForKey(req, key)) return true;
+
+  const sid = parseCookieHeader(req.headers.cookie).get("adminer_sid");
+  if (sid && applyStoredAdminerSessionForKey(req, `sid:${sid}`)) return true;
+
+  if (adminerSessions.size === 1) {
+    const onlyKey = adminerSessions.keys().next().value ?? "";
+    if (onlyKey) return applyStoredAdminerSessionForKey(req, onlyKey);
+  }
+  return false;
+}
+
+function applyStoredAdminerSessionForKey(req: IncomingMessage, key: string): boolean {
   const stored = adminerSessions.get(key);
   if (!stored) return false;
   const merged = mergeAdminerCookies(req.headers.cookie, stored.cookieHeader);
@@ -90,19 +102,33 @@ function applyStoredAdminerSession(req: IncomingMessage, key: string): boolean {
 }
 
 function saveAdminerSessionFromCookies(key: string, setCookies: string[]): void {
-  if (!key) return;
-  const incoming = parseCookieHeader(adminerSessions.get(key)?.cookieHeader);
+  const incoming = key ? parseCookieHeader(adminerSessions.get(key)?.cookieHeader) : new Map();
   for (const raw of setCookies) {
     const match = /^([^=]+)=([^;]*)/.exec(raw.trim());
     if (!match) continue;
     const name = match[1].trim();
     if (name === "adminer_sid" || name === "adminer_key") incoming.set(name, match[2].trim());
   }
-  if (!incoming.has("adminer_sid")) return;
-  adminerSessions.set(key, {
-    cookieHeader: buildCookieHeader(incoming),
-    updatedAt: Date.now(),
-  });
+  if (!incoming.has("adminer_sid") && !incoming.has("adminer_key")) return;
+
+  const cookieHeader = buildCookieHeader(incoming);
+  const entry = { cookieHeader, updatedAt: Date.now() };
+
+  if (key) adminerSessions.set(key, entry);
+  const sid = incoming.get("adminer_sid");
+  if (sid) adminerSessions.set(`sid:${sid}`, entry);
+}
+
+function rememberOutgoingAdminerCookies(key: string, cookieHeader: string | undefined): void {
+  if (!key || !cookieHeader) return;
+  const pairs = parseCookieHeader(cookieHeader);
+  const adminer = new Map<string, string>();
+  for (const name of ["adminer_sid", "adminer_key"] as const) {
+    const value = pairs.get(name);
+    if (value) adminer.set(name, value);
+  }
+  if (adminer.size === 0) return;
+  saveAdminerSessionFromCookies(key, [...adminer.entries()].map(([name, value]) => `${name}=${value}`));
 }
 
 function collectSetCookies(headers: IncomingHttpHeaders): string[] {
@@ -165,6 +191,7 @@ const STRIPPED_RESPONSE_HEADERS = new Set([
   "x-frame-options",
   "content-security-policy",
   "content-security-policy-report-only",
+  "host",
 ]);
 
 const HOP_BY_HOP_HEADERS = new Set([
@@ -178,8 +205,8 @@ const HOP_BY_HOP_HEADERS = new Set([
   "upgrade",
 ]);
 
-/** Client fixes: URL base, session key in URL + forms (Cycloid may not forward cookies). */
-const IFRAME_CLIENT_SCRIPT = `<script>(function(){function sessionKey(){var p=location.pathname;if(p.indexOf("/iframe")<0)return"";if(p.indexOf("/iframe/adminer")<0)p=p.replace(/\\/?$/,"")+"/adminer";return p.replace(/\\/$/,"")}function baseDir(){var k=sessionKey();return k?location.origin+k+"/":null}function fixUrl(u){var b=baseDir();if(!b||!u)return u;if(/^https?:\\/\\//i.test(u)||u.indexOf("//")===0)return u;if(u.charAt(0)==="/")return b.replace(/\\/$/,"")+u;if(u.charAt(0)==="?")return b.replace(/\\/?$/,"/")+u;return u}function withSk(u){var k=sessionKey();if(!k||!u)return u;try{var n=new URL(u,location.href);if(n.origin!==location.origin)return u;if(!n.searchParams.has("_cy_sk"))n.searchParams.set("_cy_sk",k);return n.pathname+n.search+n.hash}catch(e){return u}}var key=sessionKey(),b=baseDir();if(key&&!location.search.includes("_cy_sk=")){try{var u=new URL(location.href);u.searchParams.set("_cy_sk",key);history.replaceState(null,"",u.pathname+u.search)}catch(e){}}if(b&&!document.querySelector("base")){var base=document.createElement("base");base.href=b;(document.head||document.documentElement).prepend(base)}function patch(){document.querySelectorAll("a[href]").forEach(function(el){var h=el.getAttribute("href");if(h&&h.charAt(0)==="/")el.setAttribute("href",withSk(fixUrl(h)))});document.querySelectorAll('form[action^="/"],form:not([action])').forEach(function(el){var a=el.getAttribute("action");if(a&&a.charAt(0)==="/")el.setAttribute("action",withSk(fixUrl(a)))})}patch();new MutationObserver(patch).observe(document.documentElement,{childList:true,subtree:true});document.addEventListener("submit",function(e){var f=e.target;if(!f||f.nodeName!=="FORM")return;var act=f.getAttribute("action");if(!act||act==="/")f.action=withSk(fixUrl(act||"/"));if(key&&!f.querySelector('input[name="_cy_sk"]')){var i=document.createElement("input");i.type="hidden";i.name="_cy_sk";i.value=key;f.appendChild(i)}},true);var of=window.fetch;window.fetch=function(input,init){try{var url=typeof input==="string"?input:input.url;if(url&&url.indexOf("adminer.org")>=0)return Promise.resolve(new Response("{}",{status:200,headers:{"content-type":"application/json"}}))}catch(e){}return of.apply(this,arguments)}})();</script>`;
+/** Client fixes: reload once with _cy_sk in URL, then rewrite forms/links. */
+const IFRAME_CLIENT_SCRIPT = `<script>(function(){function sessionKey(){var p=location.pathname;if(p.indexOf("/iframe")<0)return"";if(p.indexOf("/iframe/adminer")<0)p=p.replace(/\\/?$/,"")+"/adminer";return p.replace(/\\/$/,"")}function baseDir(){var k=sessionKey();return k?location.origin+k+"/":null}function fixUrl(u){var b=baseDir();if(!b||!u)return u;if(/^https?:\\/\\//i.test(u)||u.indexOf("//")===0)return u;if(u.charAt(0)==="/")return b.replace(/\\/$/,"")+u;if(u.charAt(0)==="?")return b.replace(/\\/?$/,"/")+u;return u}function withSk(u){var k=sessionKey();if(!k||!u)return u;try{var n=new URL(u,location.href);if(n.origin!==location.origin)return u;if(!n.searchParams.has("_cy_sk"))n.searchParams.set("_cy_sk",k);return n.pathname+n.search+n.hash}catch(e){return u}}var key=sessionKey();if(key&&!location.search.includes("_cy_sk=")){try{var u=new URL(location.href);u.searchParams.set("_cy_sk",key);location.replace(u.pathname+u.search+u.hash);return}catch(e){}}var b=baseDir();if(b&&!document.querySelector("base")){var base=document.createElement("base");base.href=b;(document.head||document.documentElement).prepend(base)}function patch(){document.querySelectorAll("a[href]").forEach(function(el){var h=el.getAttribute("href");if(h&&h.charAt(0)==="/")el.setAttribute("href",withSk(fixUrl(h)))});document.querySelectorAll('form[action^="/"],form:not([action])').forEach(function(el){var a=el.getAttribute("action");if(a&&a.charAt(0)==="/")el.setAttribute("action",withSk(fixUrl(a)))})}patch();new MutationObserver(patch).observe(document.documentElement,{childList:true,subtree:true});document.addEventListener("submit",function(e){var f=e.target;if(!f||f.nodeName!=="FORM")return;var act=f.getAttribute("action");if(!act||act==="/")f.action=withSk(fixUrl(act||"/"));if(key&&!f.querySelector('input[name="_cy_sk"]')){var i=document.createElement("input");i.type="hidden";i.name="_cy_sk";i.value=key;f.appendChild(i)}},true);var of=window.fetch;window.fetch=function(input,init){try{var url=typeof input==="string"?input:input.url;if(url&&url.indexOf("adminer.org")>=0)return Promise.resolve(new Response("{}",{status:200,headers:{"content-type":"application/json"}}))}catch(e){}return of.apply(this,arguments)}})();</script>`;
 
 function parseRequestUrl(req: IncomingMessage): URL {
   const host = req.headers.host?.trim() || "localhost";
@@ -297,11 +324,12 @@ function rewriteSetCookie(cookie: string, _publicBasePath: string): string {
   } else {
     out += "; Path=/";
   }
-  if (!/;\s*samesite=/i.test(out)) {
-    out += "; SameSite=None; Secure";
-  } else if (!/;\s*secure(?:;|$)/i.test(out)) {
-    out += "; Secure";
+  if (/;\s*samesite=/i.test(out)) {
+    out = out.replace(/;\s*samesite=[^;]*/i, "; SameSite=None");
+  } else {
+    out += "; SameSite=None";
   }
+  if (!/;\s*secure(?:;|$)/i.test(out)) out += "; Secure";
   return out;
 }
 
@@ -419,6 +447,8 @@ function proxyAdminer(
     headers["content-length"] = String(upstreamBody.length);
   }
 
+  rememberOutgoingAdminerCookies(sessionKey, headers.cookie);
+
   const upstream = httpRequest(
     {
       hostname: "127.0.0.1",
@@ -433,6 +463,8 @@ function proxyAdminer(
       const contentType = String(upstreamRes.headers["content-type"] ?? "");
       const isHtml = contentType.includes("text/html");
       const responseHeaders = filterProxyResponseHeaders(upstreamRes.headers, publicBase.path, sessionKey);
+      responseHeaders["x-cy-adminer-debug"] =
+        `key=${sessionKey || "-"} bridged=${bridged} stored=${sessionKey ? adminerSessions.has(sessionKey) : false}`;
 
       if (!isHtml) {
         delete responseHeaders["content-length"];
