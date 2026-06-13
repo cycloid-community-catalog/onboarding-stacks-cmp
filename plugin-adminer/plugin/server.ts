@@ -9,6 +9,111 @@ if (!Number.isFinite(port) || port <= 0) {
 
 const ADMINER_PORT = process.env.ADMINER_PORT?.trim() || "8081";
 const ADMINER_MOUNT = "/adminer";
+const SESSION_TTL_MS = 24 * 60 * 60 * 1000;
+
+/** Cycloid may not forward browser Cookie headers to the plugin; bridge Adminer sessions in-process. */
+const adminerSessions = new Map<string, { cookieHeader: string; updatedAt: number }>();
+
+function parseCookieHeader(header: string | undefined): Map<string, string> {
+  const map = new Map<string, string>();
+  if (!header) return map;
+  for (const part of header.split(";")) {
+    const idx = part.indexOf("=");
+    if (idx > 0) map.set(part.slice(0, idx).trim(), part.slice(idx + 1).trim());
+  }
+  return map;
+}
+
+function buildCookieHeader(pairs: Map<string, string>): string {
+  return [...pairs.entries()].map(([name, value]) => `${name}=${value}`).join("; ");
+}
+
+function adminerSessionKey(req: IncomingMessage, search = "", body?: Buffer): string {
+  const fromQuery = new URLSearchParams(search.startsWith("?") ? search.slice(1) : search).get("_cy_sk");
+  if (fromQuery) return fromQuery.replace(/\/$/, "");
+
+  if (body && body.length > 0) {
+    const match = /(?:^|&)_cy_sk=([^&]*)/.exec(body.toString("utf8"));
+    if (match) return decodeURIComponent(match[1]).replace(/\/$/, "");
+  }
+
+  const headerNames = [
+    "x-forwarded-uri",
+    "x-original-url",
+    "x-forwarded-path",
+    "x-cycloid-plugin-uri",
+  ] as const;
+  for (const name of headerNames) {
+    const value = req.headers[name];
+    if (typeof value !== "string") continue;
+    const match = /(\/organizations\/[^\s?]*\/iframe(?:\/adminer)?)/.exec(value);
+    if (match) return match[1].replace(/\/$/, "");
+  }
+  const referer = req.headers.referer ?? req.headers.referrer;
+  if (typeof referer === "string") {
+    const match = /(\/organizations\/[^\s?]*\/iframe(?:\/adminer)?)/.exec(referer);
+    if (match) return match[1].replace(/\/$/, "");
+    try {
+      const path = new URL(referer).pathname;
+      if (path.includes("/iframe")) return path.replace(/\/$/, "");
+    } catch {
+      /* ignore malformed referer */
+    }
+  }
+  const base = parseCookieHeader(req.headers.cookie).get("cy_adminer_base");
+  if (base) return base.replace(/\/$/, "");
+  return "";
+}
+
+function pruneAdminerSessions(): void {
+  const now = Date.now();
+  for (const [key, session] of adminerSessions) {
+    if (now - session.updatedAt > SESSION_TTL_MS) adminerSessions.delete(key);
+  }
+}
+
+function mergeAdminerCookies(existing: string | undefined, stored: string): string {
+  const merged = parseCookieHeader(existing);
+  for (const [name, value] of parseCookieHeader(stored)) {
+    if (name === "adminer_sid" || name === "adminer_key") merged.set(name, value);
+  }
+  return buildCookieHeader(merged);
+}
+
+function applyStoredAdminerSession(req: IncomingMessage, key: string): boolean {
+  if (!key) return false;
+  const stored = adminerSessions.get(key);
+  if (!stored) return false;
+  const merged = mergeAdminerCookies(req.headers.cookie, stored.cookieHeader);
+  if (merged) req.headers.cookie = merged;
+  return true;
+}
+
+function saveAdminerSessionFromCookies(key: string, setCookies: string[]): void {
+  if (!key) return;
+  const incoming = parseCookieHeader(adminerSessions.get(key)?.cookieHeader);
+  for (const raw of setCookies) {
+    const match = /^([^=]+)=([^;]*)/.exec(raw.trim());
+    if (!match) continue;
+    const name = match[1].trim();
+    if (name === "adminer_sid" || name === "adminer_key") incoming.set(name, match[2].trim());
+  }
+  if (!incoming.has("adminer_sid")) return;
+  adminerSessions.set(key, {
+    cookieHeader: buildCookieHeader(incoming),
+    updatedAt: Date.now(),
+  });
+}
+
+function collectSetCookies(headers: IncomingHttpHeaders): string[] {
+  const value = headers["set-cookie"];
+  if (!value) return [];
+  return Array.isArray(value) ? value.map(String) : [String(value)];
+}
+
+function hasAdminerCookie(header: string | undefined): boolean {
+  return /(?:^|;\s*)adminer_sid=/.test(header ?? "");
+}
 
 const STRIPPED_RESPONSE_HEADERS = new Set([
   "x-frame-options",
@@ -27,8 +132,8 @@ const HOP_BY_HOP_HEADERS = new Set([
   "upgrade",
 ]);
 
-/** Runs in the iframe; rewrites root-relative URLs using the current document path. */
-const IFRAME_CLIENT_SCRIPT = `<script>(function(){function baseDir(){var p=location.pathname;if(p.indexOf("/iframe")<0)return null;if(!p.endsWith("/"))p=p.replace(/\\/[^\\/]+$/,"/");return location.origin+p}function fixUrl(u){var b=baseDir();if(!b||!u)return u;if(/^https?:\\/\\//i.test(u)||u.indexOf("//")===0)return u;if(u.charAt(0)==="/")return b.replace(/\\/$/,"")+u;if(u.charAt(0)==="?")return b.replace(/\\/?$/,"/")+u;return u}var b=baseDir();if(b){document.cookie="cy_adminer_base="+encodeURIComponent(new URL(b).pathname.replace(/\\/$/,""))+"; path=/; secure; samesite=none";if(!document.querySelector("base")){var base=document.createElement("base");base.href=b;(document.head||document.documentElement).prepend(base)}}function patch(){document.querySelectorAll('a[href^="/"],form[action^="/"]').forEach(function(el){var a=el.hasAttribute("href")?"href":"action";el.setAttribute(a,fixUrl(el.getAttribute(a)||""))})}patch();new MutationObserver(patch).observe(document.documentElement,{childList:true,subtree:true});document.addEventListener("submit",function(e){var f=e.target;if(!f||f.nodeName!=="FORM")return;var act=f.getAttribute("action");if(act===null||act===""||act==="/")f.action=fixUrl(act||"/")},true)})();</script>`;
+/** Runs in the iframe; rewrites root-relative URLs and tags forms with a stable session key. */
+const IFRAME_CLIENT_SCRIPT = `<script>(function(){function baseDir(){var p=location.pathname;if(p.indexOf("/iframe")<0)return null;if(!p.endsWith("/"))p=p.replace(/\\/[^\\/]+$/,"/");return location.origin+p}function sk(){var m=document.querySelector('meta[name="cy-session-key"]');return m?m.getAttribute("content"):""}function fixUrl(u){var b=baseDir();if(!b||!u)return u;if(/^https?:\\/\\//i.test(u)||u.indexOf("//")===0)return u;if(u.charAt(0)==="/")return b.replace(/\\/$/,"")+u;if(u.charAt(0)==="?")return b.replace(/\\/?$/,"/")+u;return u}var b=baseDir(),key=sk();if(b){document.cookie="cy_adminer_base="+encodeURIComponent(new URL(b).pathname.replace(/\\/$/,""))+"; path=/; secure; samesite=none";if(!document.querySelector("base")){var base=document.createElement("base");base.href=b;(document.head||document.documentElement).prepend(base)}}function patch(){document.querySelectorAll('a[href^="/"],form[action^="/"]').forEach(function(el){var a=el.hasAttribute("href")?"href":"action";el.setAttribute(a,fixUrl(el.getAttribute(a)||""))})}patch();new MutationObserver(patch).observe(document.documentElement,{childList:true,subtree:true});document.addEventListener("submit",function(e){var f=e.target;if(!f||f.nodeName!=="FORM")return;var act=f.getAttribute("action");if(act===null||act===""||act==="/")f.action=fixUrl(act||"/");if(key&&!f.querySelector('input[name="_cy_sk"]')){var i=document.createElement("input");i.type="hidden";i.name="_cy_sk";i.value=key;f.appendChild(i)}},true)})();</script>`;
 
 function parseRequestUrl(req: IncomingMessage): URL {
   const host = req.headers.host?.trim() || "localhost";
@@ -193,6 +298,13 @@ function injectIframeFixes(html: string, publicBase: { href: string; path: strin
   let out = html;
   if (publicBase.path) {
     out = rewriteRootRelativeUrls(out, publicBase.path);
+    if (!/<meta[^>]+name=["']cy-session-key["']/i.test(out)) {
+      const escapedKey = publicBase.path.replace(/"/g, "&quot;");
+      const meta = `<meta name="cy-session-key" content="${escapedKey}">`;
+      out = /<head[\s>]/i.test(out)
+        ? out.replace(/<head(\s[^>]*)?>/i, (m) => `${m}${meta}`)
+        : `${meta}${out}`;
+    }
     if (publicBase.href && !/<base[\s>]/i.test(out)) {
       const escaped = publicBase.href.replace(/"/g, "&quot;");
       const tag = `<base href="${escaped}">`;
@@ -248,6 +360,10 @@ function proxyAdminer(
   const adminerPath = toAdminerPath(pathname);
   const targetPath = `${adminerPath}${search}`;
   const publicBase = getPublicBase(req, requestUrl);
+  let sessionKey = adminerSessionKey(req, search, body);
+  if (!sessionKey && publicBase.path) sessionKey = publicBase.path;
+  pruneAdminerSessions();
+  const bridged = applyStoredAdminerSession(req, sessionKey);
 
   const headers: Record<string, string> = {};
   for (const [key, value] of Object.entries(req.headers)) {
@@ -255,6 +371,10 @@ function proxyAdminer(
     headers[key] = Array.isArray(value) ? value.join(", ") : value;
   }
   headers.host = `127.0.0.1:${ADMINER_PORT}`;
+
+  console.log(
+    `[INFO] adminer session key=${sessionKey || "(none)"} cookie=${hasAdminerCookie(headers.cookie) ? "yes" : "no"} bridged=${bridged}`,
+  );
 
   if (body !== undefined) {
     headers["content-length"] = String(body.length);
@@ -269,6 +389,8 @@ function proxyAdminer(
       headers,
     },
     (upstreamRes) => {
+      saveAdminerSessionFromCookies(sessionKey, collectSetCookies(upstreamRes.headers));
+
       const contentType = String(upstreamRes.headers["content-type"] ?? "");
       const isHtml = contentType.includes("text/html");
       const responseHeaders = filterProxyResponseHeaders(upstreamRes.headers, publicBase.path);
@@ -321,6 +443,16 @@ const server = createServer(async (req, res) => {
   if (method === "POST" && pathname === "/_cy/events") return sendJson(res, 200, { ok: true });
   if (method === "DELETE" && pathname === "/_cy/plugin") return sendJson(res, 200, { ok: true });
   if (method === "POST" && pathname === "/_cy/resync") return sendJson(res, 200, { started: false });
+
+  if (method === "GET" && pathname === `${ADMINER_MOUNT}/_cy/session-debug`) {
+    const sessionKey = adminerSessionKey(req, url.search);
+    return sendJson(res, 200, {
+      sessionKey: sessionKey || null,
+      incomingCookie: req.headers.cookie ?? null,
+      hasStoredSession: sessionKey ? adminerSessions.has(sessionKey) : false,
+      referer: req.headers.referer ?? req.headers.referrer ?? null,
+    });
+  }
 
   if (method === "GET" && (pathname === "/" || pathname === "")) {
     return sendAdminerShell(res);
