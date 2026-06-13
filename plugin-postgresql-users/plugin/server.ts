@@ -9,7 +9,7 @@ import {
   type DbTarget,
 } from "./network-diagnostics.ts";
 
-const PLUGIN_VERSION = "2.1.0";
+const PLUGIN_VERSION = "2.1.1";
 
 const APP_ROLES = ["readonly", "readwrite", "admin"] as const;
 type AppRole = (typeof APP_ROLES)[number];
@@ -40,8 +40,6 @@ const SYSTEM_USERS = new Set([
   "azure_pg_admin",
   "cloudsqladmin",
   "cloudsqlsuperuser",
-  "azuresu",
-  "replication",
 ]);
 
 type DbConfig = {
@@ -720,6 +718,7 @@ function renderUsersShell(instantReport: ReturnType<typeof buildInstantDiagnosti
   }
 
   function renderUsers(users, syncedAt) {
+    if (!bodyEl) return;
     if (users.length === 0) {
       bodyEl.innerHTML = '<tr><td colspan="8" class="muted">No application users found.</td></tr>';
       return;
@@ -754,12 +753,14 @@ function renderUsersShell(instantReport: ReturnType<typeof buildInstantDiagnosti
         ? "Request timed out after 20s. Check database_url and network access to PostgreSQL."
         : (err.message || String(err));
       if (alertEl) { alertEl.hidden = false; alertEl.textContent = msg; }
-      bodyEl.innerHTML = '<tr><td colspan="8" class="muted">Failed to load users.</td></tr>';
+      if (bodyEl) bodyEl.innerHTML = '<tr><td colspan="8" class="muted">Failed to load users.</td></tr>';
       showDiagnostics(embeddedDiagnostics);
     } finally {
       clearTimeout(timeout);
     }
   }
+
+  await loadUsers();
 
   const addForm = document.getElementById("add-user-form");
   if (addForm) {
@@ -792,25 +793,27 @@ function renderUsersShell(instantReport: ReturnType<typeof buildInstantDiagnosti
     });
   }
 
-  bodyEl.addEventListener("click", async (event) => {
-    const btn = event.target.closest(".delete-user");
-    if (!btn) return;
-    const username = btn.dataset.username;
-    if (!username) return;
-    if (!confirm("Delete PostgreSQL user \"" + username + "\"?")) return;
-    btn.disabled = true;
-    try {
-      const apiUrl = await pluginApiUrl("/api/users/" + encodeURIComponent(username));
-      const res = await fetch(apiUrl, { method: "DELETE", headers: { accept: "application/json" } });
-      const data = await res.json().catch(() => null);
-      if (!res.ok) throw new Error((data && data.error) || ("HTTP " + res.status));
-      if (alertEl) alertEl.hidden = true;
-      await loadUsers();
-    } catch (err) {
-      if (alertEl) { alertEl.hidden = false; alertEl.textContent = err.message || String(err); }
-      btn.disabled = false;
-    }
-  });
+  if (bodyEl) {
+    bodyEl.addEventListener("click", async (event) => {
+      const btn = event.target.closest(".delete-user");
+      if (!btn) return;
+      const username = btn.dataset.username;
+      if (!username) return;
+      if (!confirm("Delete PostgreSQL user \"" + username + "\"?")) return;
+      btn.disabled = true;
+      try {
+        const apiUrl = await pluginApiUrl("/api/users/" + encodeURIComponent(username));
+        const res = await fetch(apiUrl, { method: "DELETE", headers: { accept: "application/json" } });
+        const data = await res.json().catch(() => null);
+        if (!res.ok) throw new Error((data && data.error) || ("HTTP " + res.status));
+        if (alertEl) alertEl.hidden = true;
+        await loadUsers();
+      } catch (err) {
+        if (alertEl) { alertEl.hidden = false; alertEl.textContent = err.message || String(err); }
+        btn.disabled = false;
+      }
+    });
+  }
 
   async function runDiagnostics() {
     showDiagnostics(embeddedDiagnostics);
@@ -842,8 +845,6 @@ function renderUsersShell(instantReport: ReturnType<typeof buildInstantDiagnosti
     });
   }
   if (diagRefresh) diagRefresh.addEventListener("click", () => { runDiagnostics(); });
-
-  await loadUsers();
 })();
 </script>`;
 
