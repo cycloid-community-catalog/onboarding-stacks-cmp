@@ -9,7 +9,7 @@ import {
   type DbTarget,
 } from "./network-diagnostics.ts";
 
-const PLUGIN_VERSION = "2.2.0";
+const PLUGIN_VERSION = "2.2.2";
 
 const APP_ROLES = ["readonly", "readwrite", "admin"] as const;
 type AppRole = (typeof APP_ROLES)[number];
@@ -117,6 +117,10 @@ function quoteDbName(name: string): string {
   return `"${name.replace(/"/g, '""')}"`;
 }
 
+function quoteLiteral(value: string): string {
+  return `'${value.replace(/'/g, "''")}'`;
+}
+
 function parseAppRole(value: unknown): AppRole {
   if (typeof value !== "string" || !APP_ROLES.includes(value as AppRole)) {
     throw new Error(`appRole must be one of: ${APP_ROLES.join(", ")}`);
@@ -194,8 +198,7 @@ async function createPostgresUser(
 
   const groupRole = await ensureAppGroupRole(client, appRole, database);
   await client.query(
-    `CREATE ROLE ${quoteIdent(name)} WITH LOGIN PASSWORD $1 NOSUPERUSER NOCREATEDB NOCREATEROLE`,
-    [password],
+    `CREATE ROLE ${quoteIdent(name)} WITH LOGIN PASSWORD ${quoteLiteral(password)} NOSUPERUSER NOCREATEDB NOCREATEROLE`,
   );
   await client.query(`GRANT ${quoteIdent(groupRole)} TO ${quoteIdent(name)}`);
 }
@@ -614,7 +617,7 @@ function boolCell(value: boolean): string {
 
 function renderUserRows(users: PgUserRow[], syncedAt: string): string {
   if (users.length === 0) {
-    return `<tr><td colspan="7" class="muted">No application users found.</td></tr>`;
+    return `<tr><td colspan="8" class="muted">No application users found.</td></tr>`;
   }
   return users
     .map(
@@ -667,6 +670,8 @@ function renderUsersPage(users: PgUserRow[], syncedAt: string, error = ""): stri
     .toolbar input, .toolbar select { font: inherit; font-size: 0.875rem; padding: 0.4rem 0.55rem; border: 1px solid #c5cee0; border-radius: 6px; min-width: 10rem; }
     .btn { font: inherit; font-size: 0.875rem; padding: 0.45rem 0.85rem; border-radius: 6px; border: 1px solid #c5cee0; background: #fff; cursor: pointer; }
     .btn-primary { background: #1a6fb5; border-color: #1a6fb5; color: #fff; }
+    .btn-danger { color: #b71c1c; border-color: #ef9a9a; padding: 0.25rem 0.45rem; line-height: 1; }
+    .actions { width: 3rem; text-align: center; }
   </style>
 </head>
 <body>
@@ -697,6 +702,7 @@ function renderUsersPage(users: PgUserRow[], syncedAt: string, error = ""): stri
             <th>Can create DB</th>
             <th>Can create role</th>
             <th>Last synced</th>
+            <th class="actions"></th>
           </tr>
         </thead>
         <tbody id="users-body">${rows}</tbody>
@@ -718,8 +724,8 @@ function renderUsersPage(users: PgUserRow[], syncedAt: string, error = ""): stri
 function renderUsersShell(instantReport: ReturnType<typeof buildInstantDiagnosticsReport>): string {
   const embeddedDiagnostics = JSON.stringify(instantReport).replace(/<\//g, "<\\/");
   const page = renderUsersPage([], "", "").replace(
-    `<tbody id="users-body"><tr><td colspan="7" class="muted">No application users found.</td></tr></tbody>`,
-    `<tbody id="users-body"><tr><td colspan="7" class="muted">Loading users…</td></tr></tbody>`,
+    `<tbody id="users-body"><tr><td colspan="8" class="muted">No application users found.</td></tr></tbody>`,
+    `<tbody id="users-body"><tr><td colspan="8" class="muted">Loading users…</td></tr></tbody>`,
   );
 
   const script = `
@@ -792,7 +798,7 @@ function renderUsersShell(instantReport: ReturnType<typeof buildInstantDiagnosti
     const users = data.users || [];
     const syncedAt = data.syncedAt || "";
     if (users.length === 0) {
-      bodyEl.innerHTML = '<tr><td colspan="7" class="muted">No application users found.</td></tr>';
+      bodyEl.innerHTML = '<tr><td colspan="8" class="muted">No application users found.</td></tr>';
       return;
     }
     bodyEl.innerHTML = users.map((user) => \`
@@ -804,13 +810,14 @@ function renderUsersShell(instantReport: ReturnType<typeof buildInstantDiagnosti
         <td>\${user.canCreateDb ? "yes" : "no"}</td>
         <td>\${user.canCreateRole ? "yes" : "no"}</td>
         <td>\${syncedAt}</td>
+        <td class="actions"><button type="button" class="btn btn-danger delete-user" title="Delete user" data-username="\${user.username}">&#128465;</button></td>
       </tr>\`).join("");
   } catch (err) {
     const msg = err.name === "AbortError"
       ? "Request timed out after 20s. Check database_url and network access to PostgreSQL."
       : (err.message || String(err));
     if (alertEl) { alertEl.hidden = false; alertEl.textContent = msg; }
-    bodyEl.innerHTML = '<tr><td colspan="7" class="muted">Failed to load users.</td></tr>';
+    bodyEl.innerHTML = '<tr><td colspan="8" class="muted">Failed to load users.</td></tr>';
     showDiagnostics(embeddedDiagnostics);
   } finally {
     clearTimeout(timeout);
@@ -840,6 +847,26 @@ function renderUsersShell(instantReport: ReturnType<typeof buildInstantDiagnosti
       } catch (err) {
         if (alertEl) { alertEl.hidden = false; alertEl.textContent = err.message || String(err); }
         if (submitBtn) submitBtn.disabled = false;
+      }
+    });
+  }
+
+  if (bodyEl) {
+    bodyEl.addEventListener("click", async (event) => {
+      const btn = event.target.closest(".delete-user");
+      if (!btn) return;
+      const username = btn.dataset.username;
+      if (!username || !confirm("Delete PostgreSQL user \"" + username + "\"?")) return;
+      btn.disabled = true;
+      try {
+        const apiUrl = await pluginApiUrl("/api/users/" + encodeURIComponent(username));
+        const res = await fetch(apiUrl, { method: "DELETE", headers: { accept: "application/json" } });
+        const data = await res.json().catch(() => null);
+        if (!res.ok) throw new Error((data && data.error) || ("HTTP " + res.status));
+        location.reload();
+      } catch (err) {
+        if (alertEl) { alertEl.hidden = false; alertEl.textContent = err.message || String(err); }
+        btn.disabled = false;
       }
     });
   }
