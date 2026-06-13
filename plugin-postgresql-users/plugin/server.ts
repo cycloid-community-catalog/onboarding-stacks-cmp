@@ -105,26 +105,50 @@ function escapeHtml(s: string): string {
 }
 
 function parseDatabaseUrl(value: string): DbConfig | null {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+
   try {
-    const normalized = value.replace(/^postgres:\/\//, "postgresql://");
+    const normalized = trimmed.replace(/^postgres:\/\//, "postgresql://");
     const url = new URL(normalized);
     const host = url.hostname;
     const username = decodeURIComponent(url.username);
     const password = decodeURIComponent(url.password);
     if (!host || !username || !password) return null;
 
+    const sslParam = url.searchParams.get("sslmode");
+    const ssl =
+      sslParam === "require" ||
+      sslParam === "verify-ca" ||
+      sslParam === "verify-full" ||
+      host.includes(".rds.amazonaws.com") ||
+      host.includes(".postgres.database.azure.com");
+
     return {
       host,
       port: url.port || "5432",
       username,
       password,
-      database: url.pathname.replace(/^\//, "") || "postgres",
-      ssl:
-        host.includes(".rds.amazonaws.com") || host.includes(".postgres.database.azure.com"),
+      database: decodeURIComponent(url.pathname.replace(/^\//, "") || "postgres"),
+      ssl,
     };
   } catch {
+    const azure =
+      /^postgres(?:ql)?:\/\/([^@]+)@([^:]+):([^@]+)@([^:/]+)(?::(\d+))?\/([^?]+)/.exec(trimmed);
+    if (azure) {
+      const host = azure[4];
+      return {
+        username: decodeURIComponent(azure[1]),
+        password: decodeURIComponent(azure[3]),
+        host,
+        port: azure[5] || "5432",
+        database: decodeURIComponent(azure[6]) || "postgres",
+        ssl: host.includes(".postgres.database.azure.com"),
+      };
+    }
+
     const legacy =
-      /^postgres(?:ql)?:\/\/([^:]+):([^@]+)@([^:/]+)(?::(\d+))?\/([^?]+)/.exec(value);
+      /^postgres(?:ql)?:\/\/([^:]+):([^@]+)@([^:/]+)(?::(\d+))?\/([^?]+)/.exec(trimmed);
     if (!legacy) return null;
     const host = legacy[3];
     return {
@@ -132,7 +156,7 @@ function parseDatabaseUrl(value: string): DbConfig | null {
       password: decodeURIComponent(legacy[2]),
       host,
       port: legacy[4] || "5432",
-      database: legacy[5] || "postgres",
+      database: decodeURIComponent(legacy[5]) || "postgres",
       ssl: host.includes(".rds.amazonaws.com") || host.includes(".postgres.database.azure.com"),
     };
   }
@@ -153,6 +177,8 @@ function resolveDbConfig(): DbConfig {
   return db;
 }
 
+const DB_CONNECT_TIMEOUT_MS = 15_000;
+
 async function withPgClient<T>(db: DbConfig, fn: (client: pg.Client) => Promise<T>): Promise<T> {
   const client = new pg.Client({
     host: db.host,
@@ -161,13 +187,23 @@ async function withPgClient<T>(db: DbConfig, fn: (client: pg.Client) => Promise<
     password: db.password,
     database: db.database,
     ssl: db.ssl ? { rejectUnauthorized: false } : undefined,
-    connectionTimeoutMillis: 5_000,
+    connectionTimeoutMillis: DB_CONNECT_TIMEOUT_MS,
+    query_timeout: DB_CONNECT_TIMEOUT_MS,
   });
-  await client.connect();
   try {
+    await client.connect();
     return await fn(client);
+  } catch (err) {
+    const message = (err as Error).message ?? String(err);
+    if (/timeout/i.test(message)) {
+      throw new Error(
+        `Cannot reach PostgreSQL at ${db.host}:${db.port} (${message}). ` +
+          "Ensure public network access is enabled and the plugin container can reach the database.",
+      );
+    }
+    throw err;
   } finally {
-    await client.end();
+    await client.end().catch(() => undefined);
   }
 }
 
@@ -309,6 +345,58 @@ function renderUsersPage(users: PgUserRow[], syncedAt: string, error = ""): stri
 </html>`;
 }
 
+function renderUsersShell(): string {
+  const page = renderUsersPage([], "", "").replace(
+    `<tbody id="users-body"><tr><td colspan="7" class="muted">No application users found.</td></tr></tbody>`,
+    `<tbody id="users-body"><tr><td colspan="7" class="muted">Loading users…</td></tr></tbody>`,
+  );
+
+  const script = `
+<script>
+(async () => {
+  const alertEl = document.getElementById("alert");
+  const bodyEl = document.getElementById("users-body");
+  const apiUrl = new URL("api/users", window.location.href).href;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 20000);
+  try {
+    const res = await fetch(apiUrl, { headers: { accept: "application/json" }, signal: controller.signal });
+    const text = await res.text();
+    let data = null;
+    try { data = text ? JSON.parse(text) : null; } catch { throw new Error(text.slice(0, 240) || ("HTTP " + res.status)); }
+    if (!res.ok) throw new Error((data && data.error) || ("HTTP " + res.status));
+    if (alertEl) alertEl.hidden = true;
+    const users = data.users || [];
+    const syncedAt = data.syncedAt || "";
+    if (users.length === 0) {
+      bodyEl.innerHTML = '<tr><td colspan="7" class="muted">No application users found.</td></tr>';
+      return;
+    }
+    bodyEl.innerHTML = users.map((user) => \`
+      <tr>
+        <td>\${user.username}</td>
+        <td>\${user.appRole}</td>
+        <td>\${user.roles}</td>
+        <td>\${user.isSuperuser ? "yes" : "no"}</td>
+        <td>\${user.canCreateDb ? "yes" : "no"}</td>
+        <td>\${user.canCreateRole ? "yes" : "no"}</td>
+        <td>\${syncedAt}</td>
+      </tr>\`).join("");
+  } catch (err) {
+    const msg = err.name === "AbortError"
+      ? "Request timed out after 20s. Check database_url and network access to PostgreSQL."
+      : (err.message || String(err));
+    if (alertEl) { alertEl.hidden = false; alertEl.textContent = msg; }
+    bodyEl.innerHTML = '<tr><td colspan="7" class="muted">Failed to load users.</td></tr>';
+  } finally {
+    clearTimeout(timeout);
+  }
+})();
+</script>`;
+
+  return page.replace("</body>", `${script}</body>`);
+}
+
 async function handleUsersApi(res: ServerResponse): Promise<void> {
   try {
     const { users, syncedAt } = await fetchUsers();
@@ -349,11 +437,7 @@ const server = createServer((req, res) => {
   }
 
   if (method === "GET" && (pathname === "/" || pathname === "/index.html" || pathname === "/ui/users")) {
-    fetchUsers()
-      .then(({ users, syncedAt }) => send(res, 200, renderUsersPage(users, syncedAt), "text/html; charset=utf-8"))
-      .catch((err) =>
-        send(res, 200, renderUsersPage([], "", (err as Error).message), "text/html; charset=utf-8"),
-      );
+    send(res, 200, renderUsersShell(), "text/html; charset=utf-8");
     return;
   }
 
