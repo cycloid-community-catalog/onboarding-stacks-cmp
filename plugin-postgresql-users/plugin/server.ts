@@ -60,6 +60,12 @@ function normalizePluginPath(pathname: string): string {
     if (!rest || rest === "/") return "/";
     return rest.startsWith("/") ? rest : `/${rest}`;
   }
+  const widgetMatch = /\/plugin_widgets\/\d+\/[^/]+/.exec(pathname);
+  if (widgetMatch) {
+    const rest = pathname.slice(widgetMatch.index + widgetMatch[0].length);
+    if (!rest || rest === "/") return "/";
+    return rest.startsWith("/") ? rest : `/${rest}`;
+  }
   return pathname || "/";
 }
 
@@ -299,9 +305,15 @@ function renderUsersPage(users: PgUserRow[], syncedAt: string, error = ""): stri
 function iframeFetchHelper(): string {
   return `
 function __pluginFetchUrl(subPath) {
-  const path = window.location.pathname;
+  const path = window.location.pathname.replace(/\\/$/, "");
+  let base = path;
   const idx = path.indexOf("/iframe");
-  const base = (idx >= 0 ? path.slice(0, idx + "/iframe".length) : path).replace(/\\/$/, "");
+  if (idx >= 0) {
+    base = path.slice(0, idx + "/iframe".length);
+  } else {
+    const m = /^(.*\\/plugin_widgets\\/\\d+\\/[^/]+)/.exec(path);
+    if (m) base = m[1] + "/iframe";
+  }
   const sub = subPath.startsWith("/") ? subPath : ("/" + subPath);
   return base + sub;
 }
