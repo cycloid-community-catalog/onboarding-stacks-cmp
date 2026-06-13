@@ -23,9 +23,19 @@ output "database_name" {
   value       = google_sql_database.database.name
 }
 
+output "database_host" {
+  description = "PostgreSQL server hostname or IP"
+  value       = local.database_host
+}
+
+output "database_port" {
+  description = "PostgreSQL server port"
+  value       = local.database_port
+}
+
 output "database_user" {
   description = "The name of the database user"
-  value       = google_sql_user.user.name
+  value       = local.database_user
 }
 
 output "database_password" {
@@ -35,12 +45,23 @@ output "database_password" {
 }
 
 output "connection_string" {
-  description = "The connection string for the PostgreSQL database"
-  value       = "postgresql://${google_sql_user.user.name}:${random_password.db.result}@${google_sql_database_instance.postgresql.public_ip_address}:5432/${google_sql_database.database.name}"
+  description = "Full PostgreSQL connection URL (postgresql://user:password@host:5432/database)"
+  value       = local.connection_string
   sensitive   = true
+}
+
+output "database_url" {
+  description = "Alias for connection_string — use as plugin database_url install config"
+  value       = local.connection_string
+  sensitive   = true
+}
+
+output "public_network_access_enabled" {
+  description = "Whether the instance uses a public IP for client connections"
+  value       = local.use_public_ip
 }
 
 output "credential_path" {
   description = "The path to the Cycloid credential containing database credentials"
   value       = cycloid_credential.db.path
-} 
+}

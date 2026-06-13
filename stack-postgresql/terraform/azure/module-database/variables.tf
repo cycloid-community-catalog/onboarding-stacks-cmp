@@ -57,6 +57,18 @@ variable "database_name" {
   default     = "mydatabase"
 }
 
+variable "public_network_access_enabled" {
+  description = "Expose the PostgreSQL server on the public internet (required for plugin access from Cycloid SaaS)."
+  type        = bool
+  default     = true
+}
+
+variable "allow_public_internet_access" {
+  description = "When public access is enabled, allow connections from any IPv4 address (0.0.0.0/0)."
+  type        = bool
+  default     = true
+}
+
 variable "res_selector" {
   description = "Whether to create a new VPC or select an existing one"
 }

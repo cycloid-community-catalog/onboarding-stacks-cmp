@@ -13,6 +13,8 @@ resource "azurerm_postgresql_flexible_server" "postgresql" {
 
   zone = var.zone
 
+  public_network_access_enabled = var.public_network_access_enabled
+
   lifecycle {
     # Azure assigns zone on create; it cannot be cleared or changed later unless
     # exchanging HA standby zones. Ignore drift to avoid failed in-place updates.

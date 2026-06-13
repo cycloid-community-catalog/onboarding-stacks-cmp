@@ -14,5 +14,6 @@ resource "aws_db_instance" "db" {
   skip_final_snapshot     = true
   username                = "cycloid"
   password                = random_password.db.result
+  publicly_accessible     = var.public_network_access_enabled
   vpc_security_group_ids  = ["${aws_security_group.rds.id}"]
 }

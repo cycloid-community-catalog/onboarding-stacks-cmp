@@ -40,6 +40,14 @@ module "database" {
   #+ Name of the database to create
   database_name = ""
 
+  #. public_network_access_enabled: true
+  #+ Expose PostgreSQL on the public internet (required for Cycloid plugins on SaaS)
+  public_network_access_enabled = true
+
+  #. allow_public_internet_access: true
+  #+ Allow connections from any IPv4 address (firewall 0.0.0.0/0)
+  allow_public_internet_access = true
+
   #. res_selector: ''
   #+ Whether to create a new VPC or select an existing one
   res_selector = ""

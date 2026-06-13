@@ -4,7 +4,7 @@ resource "google_sql_database_instance" "postgresql" {
   region           = var.gcp_region
 
   settings {
-    tier = var.machine_type
+    tier      = var.machine_type
     disk_size = var.disk_size
     disk_type = var.disk_type
 
@@ -18,11 +18,12 @@ resource "google_sql_database_instance" "postgresql" {
     }
 
     ip_configuration {
-      ipv4_enabled                                  = var.vpc_network != "" ? false : true
-      private_network                               = var.vpc_network
+      ipv4_enabled                                  = local.use_public_ip
+      private_network                               = var.vpc_network != "" ? var.vpc_network : null
       enable_private_path_for_google_cloud_services = var.vpc_network != "" ? true : false
+
       dynamic "authorized_networks" {
-        for_each = var.authorized_networks
+        for_each = local.use_public_ip ? local.authorized_networks : []
         content {
           name  = authorized_networks.value.name
           value = authorized_networks.value.value
@@ -38,4 +39,3 @@ resource "google_sql_database_instance" "postgresql" {
 
   deletion_protection = var.deletion_protection
 }
-

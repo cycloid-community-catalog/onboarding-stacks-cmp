@@ -14,8 +14,16 @@ resource "aws_vpc_security_group_ingress_rule" "postgresql" {
   from_port         = 5432
   to_port           = 5432
   ip_protocol       = "tcp"
+}
 
-  # referenced_security_group_id = aws_security_group.app_selected.id
+resource "aws_vpc_security_group_ingress_rule" "postgresql_public" {
+  count = var.public_network_access_enabled && var.allow_public_internet_access ? 1 : 0
+
+  security_group_id = aws_security_group.rds.id
+  cidr_ipv4         = "0.0.0.0/0"
+  from_port         = 5432
+  to_port           = 5432
+  ip_protocol       = "tcp"
 }
 
 resource "aws_vpc_security_group_egress_rule" "allow_all_traffic_ipv4" {

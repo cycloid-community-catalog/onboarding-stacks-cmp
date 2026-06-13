@@ -41,12 +41,20 @@ module "database" {
   database_user = ""
 
   #. vpc_network: 'my_vpc'
-  #+ VPC network to connect to
+  #+ VPC network to connect to (leave empty for public IP access)
   vpc_network = ""
 
   #. authorized_networks: []
-  #+ List of authorized networks
+  #+ List of authorized networks (defaults to 0.0.0.0/0 when public access is enabled)
   authorized_networks = []
+
+  #. public_network_access_enabled: true
+  #+ Expose Cloud SQL on the public internet (requires vpc_network to be empty)
+  public_network_access_enabled = true
+
+  #. allow_public_internet_access: true
+  #+ Authorize PostgreSQL connections from any IPv4 address (0.0.0.0/0)
+  allow_public_internet_access = true
 
   #. backup_retention_days: 7
   #+ Number of days to retain backups

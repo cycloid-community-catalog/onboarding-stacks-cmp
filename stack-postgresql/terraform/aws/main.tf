@@ -39,4 +39,12 @@ module "rds" {
   #. rds_subnet_ids_inventory: []
   #+ Subnets where to deploy the resources
   rds_subnet_ids_inventory = []
+
+  #. public_network_access_enabled: true
+  #+ Expose RDS on the public internet (public subnets + public IP)
+  public_network_access_enabled = true
+
+  #. allow_public_internet_access: true
+  #+ Allow PostgreSQL connections from any IPv4 address (0.0.0.0/0)
+  allow_public_internet_access = true
 }

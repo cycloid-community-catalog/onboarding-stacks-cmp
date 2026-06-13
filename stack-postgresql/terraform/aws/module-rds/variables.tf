@@ -38,3 +38,15 @@ variable "res_selector" {
 variable "rds_subnet_ids_inventory" {
   description = "Subnets where to deploy the RDS instance."
 }
+
+variable "public_network_access_enabled" {
+  description = "Expose RDS on the public internet (uses public subnets and a public IP)."
+  type        = bool
+  default     = true
+}
+
+variable "allow_public_internet_access" {
+  description = "When public access is enabled, allow PostgreSQL connections from any IPv4 address (0.0.0.0/0)."
+  type        = bool
+  default     = true
+}

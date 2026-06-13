@@ -51,9 +51,21 @@ variable "database_user" {
 }
 
 variable "vpc_network" {
-  description = "The VPC network to connect to"
+  description = "The VPC network to connect to (private access). Leave empty for public IP access."
   type        = string
-  default     = null
+  default     = ""
+}
+
+variable "public_network_access_enabled" {
+  description = "Expose Cloud SQL on the public internet (requires vpc_network to be empty)."
+  type        = bool
+  default     = true
+}
+
+variable "allow_public_internet_access" {
+  description = "When public access is enabled, authorize connections from any IPv4 address (0.0.0.0/0)."
+  type        = bool
+  default     = true
 }
 
 variable "authorized_networks" {
