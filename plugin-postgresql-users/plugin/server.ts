@@ -9,7 +9,7 @@ import {
   type DbTarget,
 } from "./network-diagnostics.ts";
 
-const PLUGIN_VERSION = "2.0.9";
+const PLUGIN_VERSION = "2.0.10";
 
 const port = Number(process.env.PORT);
 if (!Number.isFinite(port) || port <= 0) {
@@ -355,12 +355,31 @@ async function withPgClient<T>(db: DbConfig, fn: (client: pg.Client) => Promise<
   }
 }
 
-function appRoleLabel(roleNames: string[]): string {
-  if (roleNames.includes("cycloid_app_readonly")) return "readonly";
-  if (roleNames.includes("cycloid_app_readwrite")) return "readwrite";
-  if (roleNames.includes("cycloid_app_admin")) return "admin";
-  if (roleNames.length === 0) return "custom";
-  return roleNames.join(", ");
+function normalizeRoleNames(value: unknown): string[] {
+  if (value == null) return [];
+  if (Array.isArray(value)) return value.filter((item): item is string => typeof item === "string");
+  if (typeof value !== "string") return [];
+
+  const trimmed = value.trim();
+  if (!trimmed) return [];
+  if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
+    const inner = trimmed.slice(1, -1).trim();
+    if (!inner) return [];
+    return inner
+      .split(",")
+      .map((part) => part.trim().replace(/^"(.*)"$/, "$1"))
+      .filter(Boolean);
+  }
+  return [trimmed];
+}
+
+function appRoleLabel(roleNames: unknown): string {
+  const roles = normalizeRoleNames(roleNames);
+  if (roles.includes("cycloid_app_readonly")) return "readonly";
+  if (roles.includes("cycloid_app_readwrite")) return "readwrite";
+  if (roles.includes("cycloid_app_admin")) return "admin";
+  if (roles.length === 0) return "custom";
+  return roles.join(", ");
 }
 
 function isProtectedUser(username: string, masterUser: string): boolean {
@@ -377,7 +396,7 @@ async function listPostgresUsers(client: pg.Client, masterUser: string): Promise
     is_superuser: boolean;
     can_create_db: boolean;
     can_create_role: boolean;
-    member_roles: string[] | null;
+    member_roles: string[] | string | null;
   }>(`
     SELECT
       u.rolname AS username,
@@ -396,7 +415,7 @@ async function listPostgresUsers(client: pg.Client, masterUser: string): Promise
   return result.rows
     .filter((row) => !isProtectedUser(row.username, masterUser))
     .map((row) => {
-      const memberRoles = row.member_roles ?? [];
+      const memberRoles = normalizeRoleNames(row.member_roles);
       return {
         username: row.username,
         appRole: appRoleLabel(memberRoles),
