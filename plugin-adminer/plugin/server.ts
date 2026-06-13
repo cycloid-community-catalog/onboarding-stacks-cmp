@@ -273,21 +273,27 @@ function parseRequestUrl(req: IncomingMessage): URL {
   }
 }
 
+function normalizeSlashes(pathname: string): string {
+  const collapsed = pathname.replace(/\/+/g, "/");
+  if (collapsed.length > 1 && collapsed.endsWith("/")) return collapsed.slice(0, -1);
+  return collapsed || "/";
+}
+
 function normalizePluginPath(pathname: string): string {
   const iframeIdx = pathname.indexOf("/iframe");
   if (iframeIdx >= 0) {
     const rest = pathname.slice(iframeIdx + "/iframe".length);
     if (!rest || rest === "/") return "/";
-    return rest.startsWith("/") ? rest : `/${rest}`;
+    return normalizeSlashes(rest.startsWith("/") ? rest : `/${rest}`);
   }
-  return pathname || "/";
+  return normalizeSlashes(pathname || "/");
 }
 
 function resolvePathname(url: URL, rawPathname: string): string {
   const proxyPath = url.searchParams.get("path")?.trim();
   if (proxyPath) {
     const normalized = proxyPath.startsWith("/") ? proxyPath : `/${proxyPath}`;
-    return normalized.replace(/\/$/, "") || "/";
+    return normalizeSlashes(normalized.replace(/\/$/, "") || "/");
   }
   return normalizePluginPath(rawPathname);
 }
@@ -520,9 +526,9 @@ function sendAdminerShell(res: ServerResponse): void {
 <title>Adminer</title>
 <style>html,body{margin:0;height:100%;overflow:hidden;position:relative}iframe{width:100%;height:100%;border:0;display:block}.cy-open-tab{position:absolute;top:8px;right:12px;z-index:1;font:13px/1.4 sans-serif}.cy-open-tab a{color:#1c9797}</style>
 </head><body>
-<p class="cy-open-tab"><a href="adminer/" target="_blank" rel="noopener">Open Adminer in new tab</a></p>
+<p class="cy-open-tab"><a id="cy-open-tab" href="#" target="_blank" rel="noopener">Open Adminer in new tab</a></p>
 <iframe id="adminer" title="Adminer"></iframe>
-<script>(function(){var sk=location.pathname.replace(/\\/?$/,"")+"/adminer";var q="_cy_sk="+encodeURIComponent(sk);document.getElementById("adminer").src="adminer/?"+q;document.querySelector(".cy-open-tab a").href="adminer/?"+q})();</script>
+<script>(function(){var sk=location.pathname.replace(/\\/?$/,"")+"/adminer";var u=sk+"?_cy_sk="+encodeURIComponent(sk);document.getElementById("adminer").src=u;var a=document.getElementById("cy-open-tab");a.href=u})();</script>
 </body></html>`;
   res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
   res.end(html);
@@ -544,6 +550,7 @@ type AdminerProxyContext = {
   origin: string;
   bridged: boolean;
   redirectCount: number;
+  seenRedirectPaths?: Set<string>;
 };
 
 function respondAdminerUpstream(
@@ -619,6 +626,12 @@ function dispatchAdminerRequest(
       if (canFollow) {
         upstreamRes.resume();
         const followPath = locationToAdminerPath(location);
+        const seen = ctx.seenRedirectPaths ?? new Set<string>();
+        if (seen.has(followPath)) {
+          console.log(`[WARN] adminer redirect loop detected at ${followPath}`);
+          return respondAdminerUpstream(ctx, upstreamRes, ctx.redirectCount > 0);
+        }
+        seen.add(followPath);
         applyStoredAdminerSession(ctx.req, ctx.sessionKey);
 
         console.log(
@@ -626,7 +639,7 @@ function dispatchAdminerRequest(
         );
 
         return dispatchAdminerRequest(
-          { ...ctx, redirectCount: ctx.redirectCount + 1 },
+          { ...ctx, redirectCount: ctx.redirectCount + 1, seenRedirectPaths: seen },
           "GET",
           followPath,
           buildUpstreamHeaders(ctx.req, ctx.sessionKey, undefined),
@@ -643,10 +656,8 @@ function dispatchAdminerRequest(
     ctx.res.end(`Adminer unavailable: ${(err as Error).message}`);
   });
 
-  if (body !== undefined) {
-    upstream.write(body);
-    upstream.end();
-  }
+  if (body !== undefined) upstream.write(body);
+  upstream.end();
 }
 
 function proxyAdminer(
