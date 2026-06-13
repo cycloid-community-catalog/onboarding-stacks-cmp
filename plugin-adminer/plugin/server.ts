@@ -22,44 +22,15 @@ function canonicalSessionKey(raw: string): string {
   return raw.replace(/\/adminer\/?$/i, "").replace(/\/$/, "");
 }
 
-function resolveSessionKeyParam(raw: string): string {
-  const decoded = decodeURIComponent(raw).replace(/\/$/, "");
-  if (decoded.startsWith("/organizations/")) return canonicalSessionKey(decoded);
-  return shortSessionKeys.get(decoded) ?? decoded;
+function isCanonicalKey(key: string): boolean {
+  return key.startsWith("/organizations/");
 }
 
-function publicSessionParam(canonicalKey: string): string {
-  for (const [short, full] of shortSessionKeys) {
-    if (full === canonicalKey) return short;
-  }
-  const short = randomBytes(8).toString("hex");
-  shortSessionKeys.set(short, canonicalKey);
-  return short;
+function isShortToken(key: string): boolean {
+  return /^[0-9a-f]{16}$/i.test(key);
 }
 
-function parseCookieHeader(header: string | undefined): Map<string, string> {
-  const map = new Map<string, string>();
-  if (!header) return map;
-  for (const part of header.split(";")) {
-    const idx = part.indexOf("=");
-    if (idx > 0) map.set(part.slice(0, idx).trim(), part.slice(idx + 1).trim());
-  }
-  return map;
-}
-
-function buildCookieHeader(pairs: Map<string, string>): string {
-  return [...pairs.entries()].map(([name, value]) => `${name}=${value}`).join("; ");
-}
-
-function adminerSessionKey(req: IncomingMessage, search = "", body?: Buffer): string {
-  const fromQuery = new URLSearchParams(search.startsWith("?") ? search.slice(1) : search).get("_cy_sk");
-  if (fromQuery) return resolveSessionKeyParam(fromQuery);
-
-  if (body && body.length > 0) {
-    const match = /(?:^|&)_cy_sk=([^&]*)/.exec(body.toString("utf8"));
-    if (match) return resolveSessionKeyParam(match[1]);
-  }
-
+function widgetKeyFromRequest(req: IncomingMessage): string {
   const headerNames = [
     "x-forwarded-uri",
     "x-original-url",
@@ -88,6 +59,108 @@ function adminerSessionKey(req: IncomingMessage, search = "", body?: Buffer): st
   return "";
 }
 
+function resolveSessionKeyParam(raw: string, req: IncomingMessage): string {
+  const decoded = decodeURIComponent(raw).replace(/\/$/, "");
+  if (isCanonicalKey(decoded)) return canonicalSessionKey(decoded);
+
+  const mapped = shortSessionKeys.get(decoded);
+  if (mapped) {
+    if (isCanonicalKey(mapped)) return mapped;
+    const fromWidget = widgetKeyFromRequest(req);
+    if (fromWidget) {
+      shortSessionKeys.set(decoded, fromWidget);
+      return fromWidget;
+    }
+    return mapped;
+  }
+
+  const fromWidget = widgetKeyFromRequest(req);
+  if (fromWidget) {
+    shortSessionKeys.set(decoded, fromWidget);
+    return fromWidget;
+  }
+  return decoded;
+}
+
+function normalizeStorageKey(
+  key: string,
+  req: IncomingMessage,
+  publicBasePath: string,
+): string {
+  if (!key) {
+    const fromWidget = widgetKeyFromRequest(req);
+    if (fromWidget) return fromWidget;
+    if (publicBasePath) return canonicalSessionKey(publicBasePath);
+    return "";
+  }
+  if (isCanonicalKey(key)) return canonicalSessionKey(key);
+
+  if (key.startsWith("sid:")) {
+    const fromWidget = widgetKeyFromRequest(req);
+    if (fromWidget) return fromWidget;
+    if (publicBasePath) return canonicalSessionKey(publicBasePath);
+    return key;
+  }
+
+  if (isShortToken(key)) {
+    const mapped = shortSessionKeys.get(key);
+    if (mapped && isCanonicalKey(mapped)) return mapped;
+    const fromWidget = widgetKeyFromRequest(req);
+    if (fromWidget) {
+      shortSessionKeys.set(key, fromWidget);
+      return fromWidget;
+    }
+  }
+
+  if (publicBasePath) return canonicalSessionKey(publicBasePath);
+  return key;
+}
+
+function publicSessionParam(canonicalKey: string): string {
+  if (!isCanonicalKey(canonicalKey)) return canonicalKey;
+  for (const [short, full] of shortSessionKeys) {
+    if (full === canonicalKey) return short;
+  }
+  const short = randomBytes(8).toString("hex");
+  shortSessionKeys.set(short, canonicalKey);
+  return short;
+}
+
+function relinkShortTokens(canonicalKey: string, sid?: string): void {
+  if (!isCanonicalKey(canonicalKey)) return;
+  for (const [short, mapped] of shortSessionKeys) {
+    if (mapped === canonicalKey || (sid && mapped === `sid:${sid}`)) {
+      shortSessionKeys.set(short, canonicalKey);
+    }
+  }
+}
+
+function parseCookieHeader(header: string | undefined): Map<string, string> {
+  const map = new Map<string, string>();
+  if (!header) return map;
+  for (const part of header.split(";")) {
+    const idx = part.indexOf("=");
+    if (idx > 0) map.set(part.slice(0, idx).trim(), part.slice(idx + 1).trim());
+  }
+  return map;
+}
+
+function buildCookieHeader(pairs: Map<string, string>): string {
+  return [...pairs.entries()].map(([name, value]) => `${name}=${value}`).join("; ");
+}
+
+function adminerSessionKey(req: IncomingMessage, search = "", body?: Buffer): string {
+  const fromQuery = new URLSearchParams(search.startsWith("?") ? search.slice(1) : search).get("_cy_sk");
+  if (fromQuery) return resolveSessionKeyParam(fromQuery, req);
+
+  if (body && body.length > 0) {
+    const match = /(?:^|&)_cy_sk=([^&]*)/.exec(body.toString("utf8"));
+    if (match) return resolveSessionKeyParam(match[1], req);
+  }
+
+  return widgetKeyFromRequest(req);
+}
+
 function pruneAdminerSessions(): void {
   const now = Date.now();
   for (const [key, session] of adminerSessions) {
@@ -113,10 +186,6 @@ function applyStoredAdminerSession(req: IncomingMessage, key: string): boolean {
   const sid = parseCookieHeader(req.headers.cookie).get("adminer_sid");
   if (sid && applyStoredAdminerSessionForKey(req, `sid:${sid}`)) return true;
 
-  if (adminerSessions.size === 1) {
-    const onlyKey = adminerSessions.keys().next().value ?? "";
-    if (onlyKey) return applyStoredAdminerSessionForKey(req, onlyKey);
-  }
   return false;
 }
 
@@ -141,6 +210,16 @@ function saveAdminerSessionFromCookies(key: string, setCookies: string[]): void 
 
   const cookieHeader = buildCookieHeader(incoming);
   const entry = { cookieHeader, updatedAt: Date.now() };
+
+  if (key && isCanonicalKey(key)) {
+    adminerSessions.set(key, entry);
+    const sid = incoming.get("adminer_sid");
+    if (sid) {
+      adminerSessions.set(`sid:${sid}`, entry);
+      relinkShortTokens(key, sid);
+    }
+    return;
+  }
 
   if (key) adminerSessions.set(key, entry);
   const sid = incoming.get("adminer_sid");
@@ -173,8 +252,12 @@ function locationToAdminerPath(location: string): string {
   return `${adminerPath}${query}`;
 }
 
-function injectAdminerSessionHeaders(headers: Record<string, string>, sessionKey: string): void {
-  const stored = sessionKey ? adminerSessions.get(sessionKey) : undefined;
+function injectAdminerSessionHeaders(headers: Record<string, string>, sessionKey: string, req: IncomingMessage): void {
+  let stored = sessionKey ? adminerSessions.get(sessionKey) : undefined;
+  if (!stored) {
+    const sid = parseCookieHeader(headers.cookie).get("adminer_sid");
+    if (sid) stored = adminerSessions.get(`sid:${sid}`);
+  }
   if (!stored) return;
   const pairs = parseCookieHeader(stored.cookieHeader);
   const sid = pairs.get("adminer_sid");
@@ -196,7 +279,7 @@ function buildUpstreamHeaders(
   headers.host = `127.0.0.1:${ADMINER_PORT}`;
   applyStoredAdminerSession(req, sessionKey);
   if (req.headers.cookie) headers.cookie = String(req.headers.cookie);
-  injectAdminerSessionHeaders(headers, sessionKey);
+  injectAdminerSessionHeaders(headers, sessionKey, req);
   rememberOutgoingAdminerCookies(sessionKey, headers.cookie);
   if (body !== undefined) headers["content-length"] = String(body.length);
   return headers;
@@ -222,12 +305,8 @@ function resolveSessionKey(
   body: Buffer | undefined,
   publicBasePath: string,
 ): string {
-  let key = adminerSessionKey(req, search, body);
-  if (!key && publicBasePath) key = canonicalSessionKey(publicBasePath);
-  if (!key && adminerSessions.size === 1) {
-    key = adminerSessions.keys().next().value ?? "";
-  }
-  return key;
+  const raw = adminerSessionKey(req, search, body);
+  return normalizeStorageKey(raw, req, publicBasePath);
 }
 
 function requestOrigin(req: IncomingMessage): string {
@@ -583,7 +662,7 @@ function respondAdminerUpstream(
   const stored = ctx.sessionKey ? adminerSessions.get(ctx.sessionKey) : undefined;
   const cookieNames = stored ? [...parseCookieHeader(stored.cookieHeader).keys()].join(",") : "-";
   responseHeaders["x-cy-adminer-debug"] =
-    `key=${ctx.sessionKey || "-"} sk=${ctx.sessionKey ? publicSessionParam(ctx.sessionKey) : "-"} bridged=${ctx.bridged} stored=${Boolean(stored)} cookies=${cookieNames} redirects=${ctx.redirectCount}`;
+    `key=${ctx.sessionKey || "-"} sk=${isCanonicalKey(ctx.sessionKey) ? publicSessionParam(ctx.sessionKey) : "-"} bridged=${ctx.bridged} stored=${Boolean(stored)} cookies=${cookieNames} redirects=${ctx.redirectCount}`;
 
   const statusCode =
     internalizedRedirect && (upstreamRes.statusCode ?? 0) >= 300 && (upstreamRes.statusCode ?? 0) < 400
