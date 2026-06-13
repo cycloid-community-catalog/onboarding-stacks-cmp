@@ -135,19 +135,23 @@ function rewriteLocation(location: string, publicBasePath: string): string {
   return `${publicBasePath}/${pathAndQuery}`;
 }
 
-function rewriteSetCookie(cookie: string, publicBasePath: string): string {
+function rewriteSetCookie(cookie: string, _publicBasePath: string): string {
   let out = cookie;
-  const pathValue = publicBasePath ? `${publicBasePath}/` : "/";
+  // Keep Path=/ so the cookie is sent on every plugin_widgets request on this host.
+  // Narrow paths break sessions when the proxy path does not match exactly.
   if (/;\s*path=/i.test(out)) {
-    out = out.replace(/;\s*path=[^;]*/i, `; Path=${pathValue}`);
+    out = out.replace(/;\s*path=[^;]*/i, "; Path=/");
   } else {
-    out += `; Path=${pathValue}`;
+    out += "; Path=/";
   }
   if (!/;\s*samesite=/i.test(out)) {
     out += "; SameSite=None; Secure";
   } else {
     out = out.replace(/;\s*samesite=[^;]*/i, "; SameSite=None");
     if (!/;\s*secure(?:;|$)/i.test(out)) out += "; Secure";
+  }
+  if (!/;\s*partitioned(?:;|$)/i.test(out)) {
+    out += "; Partitioned";
   }
   return out;
 }
@@ -216,8 +220,9 @@ function sendAdminerShell(res: ServerResponse): void {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Adminer</title>
-<style>html,body{margin:0;height:100%;overflow:hidden}iframe{width:100%;height:100%;border:0;display:block}</style>
+<style>html,body{margin:0;height:100%;overflow:hidden;position:relative}iframe{width:100%;height:100%;border:0;display:block}.cy-open-tab{position:absolute;top:8px;right:12px;z-index:1;font:13px/1.4 sans-serif}.cy-open-tab a{color:#1c9797}</style>
 </head><body>
+<p class="cy-open-tab"><a href="adminer/" target="_blank" rel="noopener">Open Adminer in new tab</a></p>
 <iframe src="adminer/" title="Adminer"></iframe>
 </body></html>`;
   res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
