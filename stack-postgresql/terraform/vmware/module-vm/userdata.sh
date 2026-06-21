@@ -18,10 +18,10 @@ apt-get install -y "postgresql-${POSTGRESQL_VERSION}" "postgresql-client-${POSTG
 CONF="/etc/postgresql/${POSTGRESQL_VERSION}/main/postgresql.conf"
 HBA="/etc/postgresql/${POSTGRESQL_VERSION}/main/pg_hba.conf"
 
-sed -i "s/^#*listen_addresses.*/listen_addresses = '*'/" "${CONF}"
+sed -i "s/^#*listen_addresses.*/listen_addresses = '*'/" "$CONF"
 
-grep -q '0.0.0.0/0' "${HBA}" || \
-  echo "host    all    all    0.0.0.0/0    scram-sha-256" >> "${HBA}"
+grep -q '0.0.0.0/0' "$HBA" || \
+  echo "host    all    all    0.0.0.0/0    scram-sha-256" >> "$HBA"
 
 systemctl restart postgresql
 systemctl enable postgresql

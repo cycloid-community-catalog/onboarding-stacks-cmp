@@ -433,9 +433,20 @@ use_cases:
   sections:
   - name: PostgreSQL
     groups:
-    - name: PostgreSQL Configuration
+    - name: VM Configuration
       technologies: [terraform]
       vars:
+      - name: "VM Size"
+        description: "Size of the virtual machine."
+        key: vm_size
+        widget: dropdown
+        type: map
+        default: "Medium"
+        values:
+        - {"label": "Small", "value": "small"}
+        - {"label": "Medium", "value": "medium"}
+        - {"label": "Large", "value": "large"}
+        required: true
       - name: "PostgreSQL Version"
         description: "PostgreSQL major version installed via cloud-init."
         key: postgresql_version
