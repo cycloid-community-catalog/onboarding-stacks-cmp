@@ -260,7 +260,7 @@ jobs:
 
                 METADATA=tfstate/metadata
                 for key in database_host database_port database_user database_password database_name; do
-                  val="$(jq -r --arg k "${key}" '.[$k] // empty' "${METADATA}")"
+                  val="$(KEY="${key}" jq -r '.[env.KEY] // empty' "${METADATA}")"
                   if [[ -z "${val}" || "${val}" == "null" ]]; then
                     echo "error: missing terraform output ${key} in ${METADATA}" >&2
                     exit 1
@@ -333,7 +333,7 @@ jobs:
                       fi
                     done
 
-                    install_id="$(cy plugin list -o json | jq -er --arg pref "${preferred}" --arg reg "${registry_plugin}" '
+                    install_id="$(PREF="${preferred}" REG="${registry_plugin}" cy plugin list -o json | jq -er '
                       def plugins:
                         if type == "array" then .
                         elif (.data | type) == "array" then .data
@@ -342,10 +342,10 @@ jobs:
                       def norm: ascii_downcase | gsub("[^a-z0-9]"; "");
                       plugins[]
                       | select(
-                          ((.name // "" | norm) == ($pref | norm))
-                          or ((.canonical // "" | norm) == ($pref | norm))
-                          or ((.name // "" | norm) == ($reg | norm))
-                          or ((.canonical // "" | norm) == ($reg | norm))
+                          ((.name // "" | norm) == (env.PREF | norm))
+                          or ((.canonical // "" | norm) == (env.PREF | norm))
+                          or ((.name // "" | norm) == (env.REG | norm))
+                          or ((.canonical // "" | norm) == (env.REG | norm))
                         )
                       | (.id // .install_id)
                     ' 2>/dev/null | head -1)" || true
