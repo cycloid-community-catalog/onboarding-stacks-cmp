@@ -75,6 +75,20 @@ Configured on the Cycloid environment, not in StackForms:
 - `max_connections`: Maximum number of connections (default: 100)
 - `deletion_protection`: Enable deletion protection (default: true)
 
+### Clever Cloud Configuration (managed environment)
+
+Configured on the Cycloid environment, not in StackForms:
+
+- `env_providers.clevercloud.token` / `secret`: OAuth1 credentials from the attached Clever Cloud Cloud Account
+- `env_providers.clevercloud.organisation`: Clever Cloud organisation ID — **`orga_xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`** or personal space **`user_xxxxxxxx-...`**. This is **not** your Cycloid org name. Find it in [Clever Cloud console](https://console.clever-cloud.com) → Organisation settings, or run `clever profile`.
+
+### Clever Cloud StackForms
+- `service_name`: PostgreSQL add-on name
+- `plan`: Add-on plan (default: dev)
+- `region`: Clever Cloud region (default: par)
+- `postgresql_version`: PostgreSQL major version (optional)
+- `backup_enabled` / `encryption_enabled`: Backup and encryption toggles
+
 ### Network Configuration
 - `res_selector`: Selection method for VPC/Resource Group (new or existing)
 - `app_security_group_id`: Application security group for database access

@@ -415,7 +415,7 @@ use_cases:
         key: encryption_enabled
         widget: switch
         type: boolean
-        default: true
+        default: false
         required: true
 
     - name: Day-2 Operations

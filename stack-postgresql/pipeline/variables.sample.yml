@@ -16,6 +16,7 @@
 #
 # Clever Cloud use case:
 # - Cloud account (clevercloud): env_providers.clevercloud.token, secret, organisation
+# - organisation must be orga_<uuid> or user_<uuid> (Clever Cloud console → Organisation settings)
 #
 
 #
@@ -65,7 +66,7 @@ plugin_adminer_install_name: Adminer
 
 #. plugin_adminer_version_id (optional):
 #+ Registry version ID for Adminer. Leave empty or set to latest to install the newest published version.
-plugin_adminer_version_id:
+plugin_adminer_version_id: ""
 
 #. plugin_postgresql_users_name (optional): "PostgreSQL Users"
 #+ PostgreSQL Users plugin name in the registry. Aliases tried: PostgreSQL Users, cycloid-plugin-postgresql-users, postgresql-users.
