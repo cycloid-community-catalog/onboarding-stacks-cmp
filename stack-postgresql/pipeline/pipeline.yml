@@ -144,8 +144,6 @@ jobs:
         params:
           terraform_source: merged-stack/
 
-      - get: tfstate
-
       - task: register-plugins
         config:
           platform: linux
