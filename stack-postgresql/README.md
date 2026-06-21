@@ -89,6 +89,20 @@ Configured on the Cycloid environment, not in StackForms:
 - `postgresql_version`: PostgreSQL major version (optional)
 - `backup_enabled` / `encryption_enabled`: Backup and encryption toggles. The **dev** plan does not support backups — leave `backup_enabled` off or use **xxs_sml** or higher.
 
+### VMware Configuration (managed environment)
+
+The VMware use case provisions an **AWS EC2** instance with Terraform and installs PostgreSQL via **cloud-init** on first boot. Attach an **AWS Cloud Account** on the Cycloid environment:
+
+- `env_providers.aws.access_key` / `env_providers.aws.secret_key`: from the attached AWS Cloud Account
+- `env_vars.aws_region`: AWS region for EC2 deployment
+
+PostgreSQL port **5432** is open to the public internet (`0.0.0.0/0`).
+
+### VMware StackForms
+- `instance_type`: EC2 instance type (default: t3.micro)
+- `volume_size`: Root EBS volume size in GB (default: 20)
+- `postgresql_version`: PostgreSQL major version (default: 16)
+
 ### Network Configuration
 - `res_selector`: Selection method for VPC/Resource Group (new or existing)
 - `app_security_group_id`: Application security group for database access
@@ -124,6 +138,8 @@ The stack is designed to be deployed through Cycloid's platform. The deployment 
   - `aws/`: AWS RDS-specific configurations
   - `azure/`: Azure Database-specific configurations
   - `gcp/`: GCP Cloud SQL-specific configurations
+  - `clevercloud/`: Clever Cloud add-on configurations
+  - `vmware/`: AWS EC2 VM configurations with cloud-init PostgreSQL bootstrap
 - `pipeline/`: Contains pipeline configuration for Cycloid
 - `.cycloid.yml`: Cycloid project configuration
 - `.forms.yml`: Forms configuration for Cycloid

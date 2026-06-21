@@ -1,0 +1,22 @@
+provider "aws" {
+  access_key = var.aws_access_key
+  secret_key = var.aws_secret_key
+  region     = var.aws_region
+
+  default_tags {
+    tags = {
+      "cycloid.io" = "true"
+      cy_env       = var.cy_env
+      cy_project   = var.cy_project
+      cy_org       = var.cy_org
+      cy_component = var.cy_component
+      demo         = true
+    }
+  }
+}
+
+provider "cycloid" {
+  api_url              = var.cy_api_url
+  api_key              = var.cy_api_key
+  default_organization = var.cy_org
+}

@@ -431,14 +431,27 @@ use_cases:
 
 - name: vmware
   sections:
-  - name: Not yet implemented
+  - name: PostgreSQL
     groups:
-    - name: Not yet implemented
-      technologies: []
+    - name: PostgreSQL Configuration
+      technologies: [terraform]
       vars:
-      - name: "Not yet implemented"
-        description: "Not yet implemented"
-        key: not_yet_implemented
-        widget: simple_text
+      - name: "PostgreSQL Version"
+        description: "PostgreSQL major version installed via cloud-init."
+        key: postgresql_version
+        widget: auto_complete
         type: string
+        default: "16"
+        values: ["14", "15", "16", "17"]
+        required: true
+
+    - name: Day-2 Operations
+      technologies: [pipeline]
+      vars:
+      - name: "Destroy Timer"
+        description: "The number of minutes to wait before automatically destroying the infrastructure after creation."
+        key: destroy_timer_in_minutes
+        widget: number
+        type: integer
+        default: 60
         required: true

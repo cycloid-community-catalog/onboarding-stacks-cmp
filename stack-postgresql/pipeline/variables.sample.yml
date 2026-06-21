@@ -18,6 +18,10 @@
 # - Cloud account (clevercloud): env_providers.clevercloud.token, secret, organisation
 # - organisation must be orga_<uuid> or user_<uuid> (Clever Cloud console → Organisation settings)
 #
+# VMware use case (AWS EC2 as we don't have a VMware lab yet + cloud-init PostgreSQL bootstrap):
+# - Cloud account (aws): env_providers.aws.access_key, env_providers.aws.secret_key
+# - Region: env_vars.aws_region
+#
 
 #
 # Day 2 CLI Operations
