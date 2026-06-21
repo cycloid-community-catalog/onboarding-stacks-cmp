@@ -1,5 +1,5 @@
 resource "aws_db_instance" "db" {
-  identifier              = "${var.cy_org}-${var.cy_project}-${var.cy_env}-${var.cy_component}"
+  identifier              = local.resource_slug
   apply_immediately       = true
   backup_window           = "02:00-04:00"
   maintenance_window      = "tue:06:00-tue:07:00"

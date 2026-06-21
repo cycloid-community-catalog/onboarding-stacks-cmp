@@ -15,7 +15,7 @@ output "postgresql_server_id" {
 
 output "database_name" {
   description = "The name of the database"
-  value       = azurerm_postgresql_flexible_server_database.database.name
+  value       = local.database_name
 }
 
 output "database_host" {

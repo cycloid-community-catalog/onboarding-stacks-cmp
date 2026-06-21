@@ -176,14 +176,14 @@ use_cases:
         default: "psqladmin"
         required: true
       - name: "Database Name"
-        description: "Name of the database to create."
+        description: "Name of the database to create (stored in lowercase, hyphens removed)."
         key: database_name
         widget: simple_text
         type: string
         default: "($ .project $)($ .env $)postgresql"
         validations:
-          - regexp: "^[a-z0-9]+$"
-            error_message: "Must begin with a letter and contain alphanumeric chars"
+          - regexp: "^[a-zA-Z0-9-]+$"
+            error_message: "Must contain only letters, numbers, and hyphens"
         required: true
       - name: "Azure Location"
         description: "Azure location."
@@ -286,16 +286,18 @@ use_cases:
         default: "PD_SSD"
         required: true
       - name: "Database Name"
-        description: "Name of the database to create."
+        description: "Name of the database to create (stored in lowercase, hyphens removed)."
         key: database_name
         widget: simple_text
         type: string
+        default: "($ .project $)($ .env $)postgresql"
         required: true
       - name: "Database User"
-        description: "Database user name."
+        description: "Database user name (stored in lowercase, hyphens removed)."
         key: database_user
         widget: simple_text
         type: string
+        default: "($ .project $)($ .env $)user"
         required: true
       - name: "VPC Network"
         description: "VPC network to connect to."

@@ -1,5 +1,5 @@
 resource "google_sql_database_instance" "postgresql" {
-  name             = var.instance_name
+  name             = lower(var.instance_name)
   database_version = var.postgresql_version
   region           = var.gcp_region
 

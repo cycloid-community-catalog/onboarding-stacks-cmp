@@ -36,8 +36,8 @@ module "database" {
   #+ Enable geo-redundant backups
   geo_redundant_backup_enabled = false
 
-  #. database_name: ''
-  #+ Name of the database to create
+  #. database_name: '($ .project $)($ .env $)postgresql'
+  #+ Name of the database to create (lowercased at apply time, hyphens removed)
   database_name = ""
 
   #. public_network_access_enabled: true

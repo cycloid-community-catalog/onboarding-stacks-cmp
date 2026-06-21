@@ -1,5 +1,5 @@
 resource "clevercloud_postgresql" "postgresql" {
-  name       = var.service_name
+  name       = lower(var.service_name)
   plan       = var.plan
   region     = var.region
   backup     = var.backup_enabled

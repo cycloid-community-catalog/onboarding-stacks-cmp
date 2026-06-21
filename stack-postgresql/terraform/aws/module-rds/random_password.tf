@@ -5,11 +5,11 @@ resource "random_password" "db" {
 }
 
 resource "cycloid_credential" "db" {
-  name                   = "${var.cy_project}-${var.cy_env}-postgresql"
+  name                   = local.credential_slug
   description            = "Username and password to connect to the PostgreSQL database."
   organization_canonical = var.cy_org
-  path                   = "${var.cy_project}-${var.cy_env}-postgresql"
-  canonical              = "${var.cy_project}-${var.cy_env}-postgresql"
+  path                   = local.credential_slug
+  canonical              = local.credential_slug
 
   type = "basic_auth"
   body = {
