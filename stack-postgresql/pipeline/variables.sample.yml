@@ -42,36 +42,38 @@ terraform_version: '1.8.3'
 # Plugin registration (after Terraform deploy)
 #
 # Requires a connected Plugin Manager and registry with Adminer + PostgreSQL Users published.
-# Find version IDs: cy plugin registry plugin version list --registry <registry> --plugin <name>
+# List registries:  cy plugin registry list --org <org>
+# List plugins:     cy plugin registry plugin list <registry>
+# List versions:    cy plugin registry plugin version list --registry <registry> --plugin <name>
 #
 
 #. register_plugins (optional): true
 #+ Install Adminer and PostgreSQL Users and enable them on the deployed component.
 register_plugins: true
 
-#. plugin_registry (required): internal
-#+ Plugin registry name, ID, or URL.
-plugin_registry: internal
+#. plugin_registry (optional):
+#+ Plugin registry name, canonical, or numeric ID. Leave empty when the org has exactly one registry.
+plugin_registry:
 
-#. plugin_adminer_name (required): adminer
-#+ Adminer plugin name in the registry.
-plugin_adminer_name: adminer
+#. plugin_adminer_name (required): cycloid-plugin-adminer
+#+ Adminer plugin name in the registry (from cy plugin registry plugin list).
+plugin_adminer_name: cycloid-plugin-adminer
 
-#. plugin_adminer_install_name (required): Adminer
-#+ Installed plugin name for cy plugin get/upgrade/relation-set.
-plugin_adminer_install_name: Adminer
+#. plugin_adminer_install_name (optional): cycloid-plugin-adminer
+#+ Installed plugin name for cy plugin get/upgrade/relation-set (defaults to registry name).
+plugin_adminer_install_name: cycloid-plugin-adminer
 
 #. plugin_adminer_version_id (required): 1
-#+ Registry version ID for Adminer.
+#+ Registry version ID for Adminer (from cy plugin registry plugin version list).
 plugin_adminer_version_id: 1
 
-#. plugin_postgresql_users_name (required): postgresql-users
+#. plugin_postgresql_users_name (required): cycloid-plugin-postgresql-users
 #+ PostgreSQL Users plugin name in the registry.
-plugin_postgresql_users_name: postgresql-users
+plugin_postgresql_users_name: cycloid-plugin-postgresql-users
 
-#. plugin_postgresql_users_install_name (required): PostgreSQL Users
+#. plugin_postgresql_users_install_name (optional): cycloid-plugin-postgresql-users
 #+ Installed plugin name for cy plugin get/upgrade/relation-set.
-plugin_postgresql_users_install_name: PostgreSQL Users
+plugin_postgresql_users_install_name: cycloid-plugin-postgresql-users
 
 #. plugin_postgresql_users_version_id (required): 1
 #+ Registry version ID for PostgreSQL Users.
