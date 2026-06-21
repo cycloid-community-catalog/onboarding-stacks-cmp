@@ -144,6 +144,8 @@ jobs:
         params:
           terraform_source: merged-stack/
 
+      - get: tfstate
+
       - task: register-plugins
         config:
           platform: linux
@@ -158,16 +160,16 @@ jobs:
           - name: git_stack-terraform
             path: stack
           run:
-            path: stack/($ .stack_path $)/pipeline/register-plugins.sh
+            path: stack/($ coalesce .stack_path "stack-postgresql" $)/pipeline/register-plugins.sh
         params:
-          REGISTER_PLUGINS: '((register_plugins))'
-          PLUGIN_REGISTRY: '((plugin_registry))'
-          PLUGIN_ADMINER_NAME: '((plugin_adminer_name))'
-          PLUGIN_ADMINER_INSTALL_NAME: '((plugin_adminer_install_name))'
-          PLUGIN_ADMINER_VERSION_ID: '((plugin_adminer_version_id))'
-          PLUGIN_PG_USERS_NAME: '((plugin_postgresql_users_name))'
-          PLUGIN_PG_USERS_INSTALL_NAME: '((plugin_postgresql_users_install_name))'
-          PLUGIN_PG_USERS_VERSION_ID: '((plugin_postgresql_users_version_id))'
+          REGISTER_PLUGINS: '((register_plugins:true))'
+          PLUGIN_REGISTRY: '((plugin_registry:""))'
+          PLUGIN_ADMINER_NAME: '((plugin_adminer_name:Adminer))'
+          PLUGIN_ADMINER_INSTALL_NAME: '((plugin_adminer_install_name:Adminer))'
+          PLUGIN_ADMINER_VERSION_ID: '((plugin_adminer_version_id:""))'
+          PLUGIN_PG_USERS_NAME: '((plugin_postgresql_users_name:"PostgreSQL Users"))'
+          PLUGIN_PG_USERS_INSTALL_NAME: '((plugin_postgresql_users_install_name:"PostgreSQL Users"))'
+          PLUGIN_PG_USERS_VERSION_ID: '((plugin_postgresql_users_version_id:""))'
           CY_API_KEY: ((cy_api_key))
           CY_API_URL: ($ .api_url $)
           CY_ORG: ($ .org $)
@@ -253,13 +255,9 @@ jobs:
             source:
               repository: cycloid/cycloid-toolkit
           run:
-            path: /bin/bash
+            path: sleep
             args:
-              - '-ec'
-              - |
-                sleep ${destroy_timer_in_minutes}m
-        params:
-          destroy_timer_in_minutes: ((destroy_timer_in_minutes))
+              - '((destroy_timer_in_minutes))m'
 
       - task: merge-stack-and-config
         config:
