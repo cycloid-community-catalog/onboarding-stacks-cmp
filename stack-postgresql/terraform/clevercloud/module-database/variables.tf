@@ -28,9 +28,9 @@ variable "postgresql_version" {
 }
 
 variable "backup_enabled" {
-  description = "Enable daily backups"
+  description = "Enable daily backups (not supported on the dev plan — use xxs_sml or higher)"
   type        = bool
-  default     = true
+  default     = false
 }
 
 variable "encryption_enabled" {

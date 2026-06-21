@@ -404,11 +404,11 @@ use_cases:
           - "12"
         required: false
       - name: "Backups Enabled"
-        description: "Enable daily backups for the add-on."
+        description: "Enable daily backups. Not available on the dev plan — choose xxs_sml or higher."
         key: backup_enabled
         widget: switch
         type: boolean
-        default: true
+        default: false
         required: true
       - name: "Encryption at Rest"
         description: "Encrypt the add-on storage at rest."

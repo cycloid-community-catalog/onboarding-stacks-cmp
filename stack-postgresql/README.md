@@ -87,7 +87,7 @@ Configured on the Cycloid environment, not in StackForms:
 - `plan`: Add-on plan (default: dev)
 - `region`: Clever Cloud region (default: par)
 - `postgresql_version`: PostgreSQL major version (optional)
-- `backup_enabled` / `encryption_enabled`: Backup and encryption toggles
+- `backup_enabled` / `encryption_enabled`: Backup and encryption toggles. The **dev** plan does not support backups — leave `backup_enabled` off or use **xxs_sml** or higher.
 
 ### Network Configuration
 - `res_selector`: Selection method for VPC/Resource Group (new or existing)

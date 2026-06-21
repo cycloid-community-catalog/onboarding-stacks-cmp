@@ -24,11 +24,11 @@ module "database" {
   #+ PostgreSQL major version (leave empty for provider default)
   postgresql_version = ""
 
-  #. backup_enabled: true
-  #+ Enable daily backups for the add-on
-  backup_enabled = true
+  #. backup_enabled: false
+  #+ Enable daily backups for the add-on (not supported on dev plan)
+  backup_enabled = false
 
-  #. encryption_enabled: true
+  #. encryption_enabled: false
   #+ Encrypt the add-on storage at rest
-  encryption_enabled = true
+  encryption_enabled = false
 }
