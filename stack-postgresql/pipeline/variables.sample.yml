@@ -14,6 +14,9 @@
 # - Region: env_vars.gcp_region
 # - Zone: env_vars.gcp_zone
 #
+# Clever Cloud use case:
+# - Cloud account (clevercloud): env_providers.clevercloud.token, secret, organisation
+#
 
 #
 # Day 2 CLI Operations

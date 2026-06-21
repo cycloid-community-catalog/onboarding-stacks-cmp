@@ -8,8 +8,8 @@ module "database" {
   cy_component = var.cy_component
   #####################################
 
-  #. server_name: ''
-  #+ Name of the PostgreSQL Flexible Server
+  #. server_name: '($ .project $)-($ .env $)-postgresql'
+  #+ Name of the PostgreSQL Flexible Server (lowercased at apply time)
   server_name = ""
 
   #. postgresql_version: 17

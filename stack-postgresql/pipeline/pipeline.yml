@@ -41,6 +41,10 @@ resources:
       GOOGLE_REGION: ($ .env_vars.gcp_region $)
       GOOGLE_ZONE: ($ .env_vars.gcp_zone $)
       GOOGLE_CREDENTIALS: ($ .env_providers.google.json_key $)
+($ else if eq .use_case "clevercloud" $)
+      clevercloud_token: ($ .env_providers.clevercloud.token $)
+      clevercloud_secret: ($ .env_providers.clevercloud.secret $)
+      clevercloud_organisation: ($ .env_providers.clevercloud.organisation $)
 ($ end $)
 
 

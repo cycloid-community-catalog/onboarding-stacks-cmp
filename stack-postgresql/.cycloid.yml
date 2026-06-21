@@ -12,6 +12,7 @@ keywords:
   - rds
   - database
   - postgresql
+  - clevercloud
 technologies:
 - technology: terraform
   version: 1.8.3
@@ -61,6 +62,21 @@ config:
       main:
         path: 'terraform/gcp/main.tf'
         destination: '($ .config_root $)/terraform/gcp/main.tf'
+
+  clevercloud:
+    name: 'Clever Cloud PostgreSQL'
+    description: 'Managed PostgreSQL add-on on Clever Cloud.'
+    cloud_provider: clevercloud
+    pipeline:
+      pipeline:
+        path: 'pipeline/pipeline.yml'
+      variables:
+        path: 'pipeline/variables.sample.yml'
+        destination: '($ .config_root $)/pipeline/variables.yml'
+    terraform:
+      main:
+        path: 'terraform/clevercloud/main.tf'
+        destination: '($ .config_root $)/terraform/clevercloud/main.tf'
 
   vmware:
     name: 'PostgreSQL on VMware'
