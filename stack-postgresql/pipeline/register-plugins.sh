@@ -98,10 +98,63 @@ resolve_plugin_version_id() {
 
 plugin_install_id_from_get() {
   local candidate="${1}"
-  cy plugin get "${candidate}" -o json 2>/dev/null | jq -er '
+  local install_id
+  install_id="$(cy plugin get "${candidate}" -o json 2>/dev/null | jq -er '
     if type == "array" then .[0] else . end
     | .id // .install_id // empty
-  ' 2>/dev/null || true
+    | tostring
+  ' 2>/dev/null || true)"
+  if [[ "${install_id}" =~ ^[0-9]+$ ]]; then
+    echo "${install_id}"
+  fi
+}
+
+plugin_install_id_from_list() {
+  local preferred="${1}"
+  local registry_plugin="${2}"
+  local install_id
+  install_id="$(PREF="${preferred}" REG="${registry_plugin}" cy plugin list -o json | jq -er '
+    def plugins:
+      if type == "array" then .
+      elif (.data | type) == "array" then .data
+      else []
+      end;
+    def norm: ascii_downcase | gsub("[^a-z0-9]"; "");
+    plugins[]
+    | select(
+        ((.name // "" | norm) == (env.PREF | norm))
+        or ((.canonical // "" | norm) == (env.PREF | norm))
+        or ((.install // "" | norm) == (env.PREF | norm))
+        or ((.name // "" | norm) == (env.REG | norm))
+        or ((.canonical // "" | norm) == (env.REG | norm))
+        or ((.install // "" | norm) == (env.REG | norm))
+      )
+    | (.id // .install_id)
+    | tostring
+  ' 2>/dev/null | head -1 || true)"
+  if [[ "${install_id}" =~ ^[0-9]+$ ]]; then
+    echo "${install_id}"
+  fi
+}
+
+plugin_install_is_ready() {
+  local install_id="${1}"
+  local status
+  status="$(cy plugin get "${install_id}" -o json 2>/dev/null | jq -r '
+    if type == "array" then .[0] else . end
+    | (.status // "") | ascii_downcase
+  ' 2>/dev/null || true)"
+  case "${status}" in
+    pending|starting|installing)
+      return 1
+      ;;
+    failed|error|stopped)
+      return 1
+      ;;
+    *)
+      return 0
+      ;;
+  esac
 }
 
 resolve_installed_plugin_ref() {
@@ -116,41 +169,27 @@ resolve_installed_plugin_ref() {
         continue
       fi
       install_id="$(plugin_install_id_from_get "${candidate}")"
-      if [[ -n "${install_id}" && "${install_id}" != "null" ]]; then
+      if [[ -n "${install_id}" ]] && plugin_install_is_ready "${install_id}"; then
         echo "${install_id}"
         return 0
       fi
     done
 
-    install_id="$(PREF="${preferred}" REG="${registry_plugin}" cy plugin list -o json | jq -er '
-      def plugins:
-        if type == "array" then .
-        elif (.data | type) == "array" then .data
-        else []
-        end;
-      def norm: ascii_downcase | gsub("[^a-z0-9]"; "");
-      plugins[]
-      | select(
-          ((.name // "" | norm) == (env.PREF | norm))
-          or ((.canonical // "" | norm) == (env.PREF | norm))
-          or ((.name // "" | norm) == (env.REG | norm))
-          or ((.canonical // "" | norm) == (env.REG | norm))
-        )
-      | (.id // .install_id)
-    ' 2>/dev/null | head -1)" || true
-
-    if [[ -n "${install_id}" && "${install_id}" != "null" ]]; then
+    install_id="$(plugin_install_id_from_list "${preferred}" "${registry_plugin}")"
+    if [[ -n "${install_id}" ]] && plugin_install_is_ready "${install_id}"; then
       echo "${install_id}"
       return 0
     fi
 
-    if [[ "${attempt}" -lt 10 ]]; then
+    if [[ -n "${install_id}" ]]; then
+      echo "waiting for plugin install ${install_id} to become ready (${attempt}/10)..." >&2
+    else
       echo "waiting for plugin install to register (${attempt}/10)..." >&2
-      sleep 3
     fi
+    sleep 3
   done
 
-  echo "error: org plugin install not found after install (tried: ${preferred}, ${registry_plugin})" >&2
+  echo "error: org plugin install not ready after install (tried: ${preferred}, ${registry_plugin})" >&2
   echo "Installed plugins:" >&2
   cy plugin list >&2 || true
   exit 1
@@ -172,14 +211,14 @@ install_or_upgrade_plugin() {
 
   if cy plugin get "${resolved_install_name}" >/dev/null 2>&1; then
     echo "Upgrading plugin ${resolved_install_name}..." >&2
-    cy plugin upgrade "${resolved_install_name}" --version-id "${version_id}" "${extra_args[@]}" || return 1
+    cy plugin upgrade "${resolved_install_name}" --version-id "${version_id}" "${extra_args[@]}" >&2 || return 1
   else
     echo "Installing plugin ${registry_plugin} (version ${version_id})..." >&2
     cy plugin registry plugin version install "${version_id}" \
       --registry "${PLUGIN_REGISTRY}" \
       --plugin "${registry_plugin}" \
       --retry \
-      "${extra_args[@]}" || return 1
+      "${extra_args[@]}" >&2 || return 1
   fi
 
   resolve_installed_plugin_ref \
