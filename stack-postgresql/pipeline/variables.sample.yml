@@ -63,9 +63,9 @@ plugin_adminer_name: Adminer
 #+ Installed plugin name for cy plugin get/upgrade/relation-set.
 plugin_adminer_install_name: Adminer
 
-#. plugin_adminer_version_id (required): 1
-#+ Registry version ID for Adminer (from cy plugin registry plugin version list --plugin Adminer).
-plugin_adminer_version_id: 1
+#. plugin_adminer_version_id (optional):
+#+ Registry version ID for Adminer. Leave empty or set to latest to install the newest published version.
+plugin_adminer_version_id:
 
 #. plugin_postgresql_users_name (optional): "PostgreSQL Users"
 #+ PostgreSQL Users plugin name in the registry. Aliases tried: PostgreSQL Users, cycloid-plugin-postgresql-users, postgresql-users.
@@ -75,6 +75,6 @@ plugin_postgresql_users_name: "PostgreSQL Users"
 #+ Installed plugin name for cy plugin get/upgrade/relation-set.
 plugin_postgresql_users_install_name: "PostgreSQL Users"
 
-#. plugin_postgresql_users_version_id (required): 1
-#+ Registry version ID for PostgreSQL Users.
-plugin_postgresql_users_version_id: 1
+#. plugin_postgresql_users_version_id (optional):
+#+ Registry version ID for PostgreSQL Users. Leave empty or set to latest to install the newest published version.
+plugin_postgresql_users_version_id:

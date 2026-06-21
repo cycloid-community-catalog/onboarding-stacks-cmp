@@ -222,6 +222,42 @@ jobs:
                   exit 1
                 }
 
+                resolve_plugin_version_id() {
+                  local registry_plugin="${1}"
+                  local configured="${2}"
+
+                  if [[ -n "${configured}" && "${configured}" != "latest" ]]; then
+                    if cy plugin registry plugin version get "${configured}" \
+                      --registry "${PLUGIN_REGISTRY}" \
+                      --plugin "${registry_plugin}" >/dev/null 2>&1; then
+                      echo "${configured}"
+                      return 0
+                    fi
+                    echo "warning: plugin version ${configured} not found for ${registry_plugin}, using latest" >&2
+                  fi
+
+                  local version_id
+                  version_id="$(cy plugin registry plugin version list \
+                    --registry "${PLUGIN_REGISTRY}" \
+                    --plugin "${registry_plugin}" \
+                    -o json | jq -r '
+                      if type == "array" then .
+                      elif (.data | type) == "array" then .data
+                      else []
+                      end
+                      | if length == 0 then empty else . end
+                      | max_by(.id // 0)
+                      | (.id | tostring)
+                    ')"
+
+                  if [[ -z "${version_id}" ]]; then
+                    echo "error: no versions published for plugin ${registry_plugin} in registry ${PLUGIN_REGISTRY}" >&2
+                    exit 1
+                  fi
+
+                  echo "${version_id}"
+                }
+
                 METADATA=tfstate/metadata
                 for key in database_host database_port database_user database_password database_name; do
                   val="$(jq -r --arg k "${key}" '.[$k] // empty' "${METADATA}")"
@@ -255,7 +291,7 @@ jobs:
 
                   if cy plugin get "${resolved_install_name}" >/dev/null 2>&1; then
                     echo "Upgrading plugin ${resolved_install_name}..." >&2
-                    cy plugin upgrade "${resolved_install_name}" --version-id "${version_id}" "${@:4}"
+                    cy plugin upgrade "${resolved_install_name}" --version-id "${version_id}" "${@:4}" || return 1
                     echo "${resolved_install_name}"
                   else
                     echo "Installing plugin ${registry_plugin} (version ${version_id})..." >&2
@@ -263,7 +299,7 @@ jobs:
                       --registry "${PLUGIN_REGISTRY}" \
                       --plugin "${registry_plugin}" \
                       --retry \
-                      "${@:4}"
+                      "${@:4}" || return 1
                     echo "${install_name:-${registry_plugin}}"
                   fi
                 }
@@ -283,10 +319,15 @@ jobs:
                   Adminer cycloid-plugin-adminer adminer)"
                 echo "Using Adminer registry plugin: ${ADMINER_REGISTRY_PLUGIN}"
 
+                ADMINER_VERSION_ID="$(resolve_plugin_version_id \
+                  "${ADMINER_REGISTRY_PLUGIN}" \
+                  "${PLUGIN_ADMINER_VERSION_ID}")"
+                echo "Using Adminer version: ${ADMINER_VERSION_ID}"
+
                 ADMINER_INSTALL_NAME="$(install_or_upgrade_plugin \
                   "${PLUGIN_ADMINER_INSTALL_NAME}" \
                   "${ADMINER_REGISTRY_PLUGIN}" \
-                  "${PLUGIN_ADMINER_VERSION_ID}")"
+                  "${ADMINER_VERSION_ID}")" || exit 1
                 enable_on_component "${ADMINER_INSTALL_NAME}"
 
                 PG_CONFIG=(
@@ -305,11 +346,16 @@ jobs:
                   "PostgreSQL Users" cycloid-plugin-postgresql-users postgresql-users)"
                 echo "Using PostgreSQL Users registry plugin: ${PG_USERS_REGISTRY_PLUGIN}"
 
+                PG_USERS_VERSION_ID="$(resolve_plugin_version_id \
+                  "${PG_USERS_REGISTRY_PLUGIN}" \
+                  "${PLUGIN_PG_USERS_VERSION_ID}")"
+                echo "Using PostgreSQL Users version: ${PG_USERS_VERSION_ID}"
+
                 PG_USERS_INSTALL_NAME="$(install_or_upgrade_plugin \
                   "${PLUGIN_PG_USERS_INSTALL_NAME}" \
                   "${PG_USERS_REGISTRY_PLUGIN}" \
-                  "${PLUGIN_PG_USERS_VERSION_ID}" \
-                  "${PG_CONFIG[@]}")"
+                  "${PG_USERS_VERSION_ID}" \
+                  "${PG_CONFIG[@]}")" || exit 1
                 enable_on_component "${PG_USERS_INSTALL_NAME}"
 
                 echo "Plugins registered and enabled on component ${CY_COMPONENT}"
