@@ -292,7 +292,6 @@ jobs:
                   if cy plugin get "${resolved_install_name}" >/dev/null 2>&1; then
                     echo "Upgrading plugin ${resolved_install_name}..." >&2
                     cy plugin upgrade "${resolved_install_name}" --version-id "${version_id}" "${@:4}" || return 1
-                    echo "${resolved_install_name}"
                   else
                     echo "Installing plugin ${registry_plugin} (version ${version_id})..." >&2
                     cy plugin registry plugin version install "${version_id}" \
@@ -300,18 +299,82 @@ jobs:
                       --plugin "${registry_plugin}" \
                       --retry \
                       "${@:4}" || return 1
-                    echo "${install_name:-${registry_plugin}}"
                   fi
+
+                  resolve_installed_plugin_ref \
+                    "${install_name}" \
+                    "${registry_plugin}" \
+                    "${resolved_install_name}"
+                }
+
+                plugin_install_id_from_get() {
+                  local candidate="${1}"
+                  cy plugin get "${candidate}" -o json 2>/dev/null | jq -er '
+                    if type == "array" then .[0] else . end
+                    | .id // .install_id // empty
+                  ' 2>/dev/null || true
+                }
+
+                resolve_installed_plugin_ref() {
+                  local preferred="${1}"
+                  local registry_plugin="${2}"
+                  shift 2
+                  local candidate install_id attempt
+
+                  for attempt in $(seq 1 10); do
+                    for candidate in "${preferred}" "${registry_plugin}" "$@"; do
+                      if [[ -z "${candidate}" ]]; then
+                        continue
+                      fi
+                      install_id="$(plugin_install_id_from_get "${candidate}")"
+                      if [[ -n "${install_id}" && "${install_id}" != "null" ]]; then
+                        echo "${install_id}"
+                        return 0
+                      fi
+                    done
+
+                    install_id="$(cy plugin list -o json | jq -er --arg pref "${preferred}" --arg reg "${registry_plugin}" '
+                      def plugins:
+                        if type == "array" then .
+                        elif (.data | type) == "array" then .data
+                        else []
+                        end;
+                      def norm: ascii_downcase | gsub("[^a-z0-9]"; "");
+                      plugins[]
+                      | select(
+                          ((.name // "" | norm) == ($pref | norm))
+                          or ((.canonical // "" | norm) == ($pref | norm))
+                          or ((.name // "" | norm) == ($reg | norm))
+                          or ((.canonical // "" | norm) == ($reg | norm))
+                        )
+                      | (.id // .install_id)
+                    ' 2>/dev/null | head -1)" || true
+
+                    if [[ -n "${install_id}" && "${install_id}" != "null" ]]; then
+                      echo "${install_id}"
+                      return 0
+                    fi
+
+                    if [[ "${attempt}" -lt 10 ]]; then
+                      echo "waiting for plugin install to register (${attempt}/10)..." >&2
+                      sleep 3
+                    fi
+                  done
+
+                  echo "error: org plugin install not found after install (tried: ${preferred}, ${registry_plugin})" >&2
+                  echo "Installed plugins:" >&2
+                  cy plugin list >&2 || true
+                  exit 1
                 }
 
                 enable_on_component() {
-                  local install_name="${1}"
-                  echo "Enabling plugin ${install_name} on ${CY_PROJECT}/${CY_ENV}/${CY_COMPONENT}..."
-                  cy plugin component relation-set "${install_name}" \
+                  local install_ref="${1}"
+                  echo "Enabling plugin install ${install_ref} on ${CY_PROJECT}/${CY_ENV}/${CY_COMPONENT}..."
+                  cy plugin component relation-set "${install_ref}" \
                     --project "${CY_PROJECT}" \
                     --env "${CY_ENV}" \
                     --component "${CY_COMPONENT}" \
-                    --enabled
+                    --enabled || return 1
                 }
 
                 ADMINER_REGISTRY_PLUGIN="$(resolve_registry_plugin \
@@ -324,11 +387,11 @@ jobs:
                   "${PLUGIN_ADMINER_VERSION_ID}")"
                 echo "Using Adminer version: ${ADMINER_VERSION_ID}"
 
-                ADMINER_INSTALL_NAME="$(install_or_upgrade_plugin \
+                ADMINER_INSTALL_REF="$(install_or_upgrade_plugin \
                   "${PLUGIN_ADMINER_INSTALL_NAME}" \
                   "${ADMINER_REGISTRY_PLUGIN}" \
                   "${ADMINER_VERSION_ID}")" || exit 1
-                enable_on_component "${ADMINER_INSTALL_NAME}"
+                enable_on_component "${ADMINER_INSTALL_REF}" || exit 1
 
                 PG_CONFIG=(
                   --config "database_host=${DB_HOST}"
@@ -351,12 +414,12 @@ jobs:
                   "${PLUGIN_PG_USERS_VERSION_ID}")"
                 echo "Using PostgreSQL Users version: ${PG_USERS_VERSION_ID}"
 
-                PG_USERS_INSTALL_NAME="$(install_or_upgrade_plugin \
+                PG_USERS_INSTALL_REF="$(install_or_upgrade_plugin \
                   "${PLUGIN_PG_USERS_INSTALL_NAME}" \
                   "${PG_USERS_REGISTRY_PLUGIN}" \
                   "${PG_USERS_VERSION_ID}" \
                   "${PG_CONFIG[@]}")" || exit 1
-                enable_on_component "${PG_USERS_INSTALL_NAME}"
+                enable_on_component "${PG_USERS_INSTALL_REF}" || exit 1
 
                 echo "Plugins registered and enabled on component ${CY_COMPONENT}"
         params:
