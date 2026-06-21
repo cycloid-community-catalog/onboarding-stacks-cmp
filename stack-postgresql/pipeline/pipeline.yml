@@ -202,6 +202,26 @@ jobs:
                 PLUGIN_REGISTRY="$(resolve_plugin_registry)"
                 echo "Using plugin registry: ${PLUGIN_REGISTRY}"
 
+                resolve_registry_plugin() {
+                  local configured="${1}"
+                  shift
+                  local candidate
+
+                  for candidate in "${configured}" "$@"; do
+                    if [[ -n "${candidate}" ]] && cy plugin registry plugin get "${candidate}" --registry "${PLUGIN_REGISTRY}" >/dev/null 2>&1; then
+                      echo "${candidate}"
+                      return 0
+                    fi
+                  done
+
+                  echo "error: registry plugin '${configured}' not found in registry ${PLUGIN_REGISTRY}" >&2
+                  echo "Tried: ${configured} $*" >&2
+                  echo "Available plugins:" >&2
+                  cy plugin registry plugin list "${PLUGIN_REGISTRY}" >&2 || true
+                  echo "Set plugin_adminer_name / plugin_postgresql_users_name in pipeline/variables.yml" >&2
+                  exit 1
+                }
+
                 METADATA=tfstate/metadata
                 for key in database_host database_port database_user database_password database_name; do
                   val="$(jq -r --arg k "${key}" '.[$k] // empty' "${METADATA}")"
@@ -225,15 +245,6 @@ jobs:
                   local install_name="${1}"
                   local registry_plugin="${2}"
                   local version_id="${3}"
-                  shift 3
-
-                  if ! cy plugin registry plugin get "${registry_plugin}" --registry "${PLUGIN_REGISTRY}" >/dev/null 2>&1; then
-                    echo "error: registry plugin '${registry_plugin}' not found in registry ${PLUGIN_REGISTRY}" >&2
-                    echo "Available plugins:" >&2
-                    cy plugin registry plugin list "${PLUGIN_REGISTRY}" >&2 || true
-                    echo "Set plugin_adminer_name / plugin_postgresql_users_name in pipeline/variables.yml" >&2
-                    exit 1
-                  fi
 
                   local resolved_install_name="${install_name}"
                   if ! cy plugin get "${resolved_install_name}" >/dev/null 2>&1 \
@@ -244,7 +255,7 @@ jobs:
 
                   if cy plugin get "${resolved_install_name}" >/dev/null 2>&1; then
                     echo "Upgrading plugin ${resolved_install_name}..." >&2
-                    cy plugin upgrade "${resolved_install_name}" --version-id "${version_id}" "$@"
+                    cy plugin upgrade "${resolved_install_name}" --version-id "${version_id}" "${@:4}"
                     echo "${resolved_install_name}"
                   else
                     echo "Installing plugin ${registry_plugin} (version ${version_id})..." >&2
@@ -252,8 +263,8 @@ jobs:
                       --registry "${PLUGIN_REGISTRY}" \
                       --plugin "${registry_plugin}" \
                       --retry \
-                      "$@"
-                    echo "${install_name}"
+                      "${@:4}"
+                    echo "${install_name:-${registry_plugin}}"
                   fi
                 }
 
@@ -267,9 +278,14 @@ jobs:
                     --enabled
                 }
 
+                ADMINER_REGISTRY_PLUGIN="$(resolve_registry_plugin \
+                  "${PLUGIN_ADMINER_NAME}" \
+                  Adminer cycloid-plugin-adminer adminer)"
+                echo "Using Adminer registry plugin: ${ADMINER_REGISTRY_PLUGIN}"
+
                 ADMINER_INSTALL_NAME="$(install_or_upgrade_plugin \
                   "${PLUGIN_ADMINER_INSTALL_NAME}" \
-                  "${PLUGIN_ADMINER_NAME}" \
+                  "${ADMINER_REGISTRY_PLUGIN}" \
                   "${PLUGIN_ADMINER_VERSION_ID}")"
                 enable_on_component "${ADMINER_INSTALL_NAME}"
 
@@ -284,9 +300,14 @@ jobs:
                   PG_CONFIG+=(--config "database_ssl_servername=${DB_SSL_SERVERNAME}")
                 fi
 
+                PG_USERS_REGISTRY_PLUGIN="$(resolve_registry_plugin \
+                  "${PLUGIN_PG_USERS_NAME}" \
+                  "PostgreSQL Users" cycloid-plugin-postgresql-users postgresql-users)"
+                echo "Using PostgreSQL Users registry plugin: ${PG_USERS_REGISTRY_PLUGIN}"
+
                 PG_USERS_INSTALL_NAME="$(install_or_upgrade_plugin \
                   "${PLUGIN_PG_USERS_INSTALL_NAME}" \
-                  "${PLUGIN_PG_USERS_NAME}" \
+                  "${PG_USERS_REGISTRY_PLUGIN}" \
                   "${PLUGIN_PG_USERS_VERSION_ID}" \
                   "${PG_CONFIG[@]}")"
                 enable_on_component "${PG_USERS_INSTALL_NAME}"
