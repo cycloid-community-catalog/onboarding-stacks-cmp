@@ -52,7 +52,7 @@ terraform_version: '1.8.3'
 register_plugins: true
 
 #. plugin_registry (optional):
-#+ Plugin registry name, canonical, or numeric ID. Leave empty when the org has exactly one registry.
+#+ Plugin registry name, canonical, or numeric ID (e.g. local or 29). Leave empty when the org has exactly one registry.
 plugin_registry:
 
 #. plugin_adminer_name (required): cycloid-plugin-adminer

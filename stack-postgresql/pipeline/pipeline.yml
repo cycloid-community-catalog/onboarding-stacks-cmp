@@ -178,7 +178,14 @@ jobs:
                   fi
 
                   local registries count
-                  registries="$(cy plugin registry list -o json | jq -r '[.data[]? | (.canonical // .name // (.id | tostring))] | .[]')"
+                  registries="$(cy plugin registry list -o json | jq -r '
+                    if type == "array" then .
+                    elif (.data | type) == "array" then .data
+                    else []
+                    end
+                    | .[]
+                    | (.canonical // .name // (.id | tostring))
+                  ')"
                   count="$(printf '%s\n' "${registries}" | sed '/^$/d' | wc -l | tr -d ' ')"
 
                   if [[ "${count}" == "1" ]]; then
