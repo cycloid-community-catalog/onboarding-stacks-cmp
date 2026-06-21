@@ -56,9 +56,9 @@ terraform_version: '1.8.3'
 #+ Install Adminer and PostgreSQL Users and enable them on the deployed component.
 register_plugins: true
 
-#. plugin_registry (optional):
+#. plugin_registry (optional): ""
 #+ Plugin registry name, canonical, or numeric ID (e.g. local or 29). Leave empty when the org has exactly one registry.
-plugin_registry:
+plugin_registry: ""
 
 #. plugin_adminer_name (optional): Adminer
 #+ Adminer plugin name in the registry (from cy plugin registry plugin list). Aliases tried: Adminer, cycloid-plugin-adminer, adminer.
@@ -82,4 +82,4 @@ plugin_postgresql_users_install_name: "PostgreSQL Users"
 
 #. plugin_postgresql_users_version_id (optional):
 #+ Registry version ID for PostgreSQL Users. Leave empty or set to latest to install the newest published version.
-plugin_postgresql_users_version_id:
+plugin_postgresql_users_version_id: ""
