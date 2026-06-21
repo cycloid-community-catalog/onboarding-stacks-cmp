@@ -140,6 +140,118 @@ jobs:
         params:
           terraform_source: merged-stack/
 
+      - get: tfstate
+
+      - task: register-plugins
+        config:
+          platform: linux
+          image_resource:
+            type: registry-image
+            source:
+              repository: cycloid/cycloid-toolkit
+              tag: latest
+          inputs:
+          - name: tfstate
+            path: tfstate
+          run:
+            path: /bin/bash
+            args:
+              - '-ec'
+              - |
+                if [[ "${REGISTER_PLUGINS}" != "true" ]]; then
+                  echo "register_plugins is disabled — skipping plugin registration"
+                  exit 0
+                fi
+
+                METADATA=tfstate/metadata
+                for key in database_host database_port database_user database_password database_name; do
+                  val="$(jq -r --arg k "${key}" '.[$k] // empty' "${METADATA}")"
+                  if [[ -z "${val}" || "${val}" == "null" ]]; then
+                    echo "error: missing terraform output ${key} in ${METADATA}" >&2
+                    exit 1
+                  fi
+                done
+
+                DB_HOST="$(jq -r .database_host "${METADATA}")"
+                DB_PORT="$(jq -r .database_port "${METADATA}")"
+                DB_USER="$(jq -r .database_user "${METADATA}")"
+                DB_PASSWORD="$(jq -r .database_password "${METADATA}")"
+                DB_NAME="$(jq -r .database_name "${METADATA}")"
+                DB_SSL_SERVERNAME="$(jq -r '.postgresql_server_fqdn // empty' "${METADATA}")"
+                if [[ "${DB_SSL_SERVERNAME}" == "null" ]]; then
+                  DB_SSL_SERVERNAME=""
+                fi
+
+                install_or_upgrade_plugin() {
+                  local install_name="${1}"
+                  local registry_plugin="${2}"
+                  local version_id="${3}"
+                  shift 3
+
+                  if cy plugin get "${install_name}" >/dev/null 2>&1; then
+                    echo "Upgrading plugin ${install_name}..."
+                    cy plugin upgrade "${install_name}" --version-id "${version_id}" "$@"
+                  else
+                    echo "Installing plugin ${registry_plugin} (version ${version_id})..."
+                    cy plugin registry plugin version install "${version_id}" \
+                      --registry "${PLUGIN_REGISTRY}" \
+                      --plugin "${registry_plugin}" \
+                      --retry \
+                      "$@"
+                  fi
+                }
+
+                enable_on_component() {
+                  local install_name="${1}"
+                  echo "Enabling plugin ${install_name} on ${CY_PROJECT}/${CY_ENV}/${CY_COMPONENT}..."
+                  cy plugin component relation-set "${install_name}" \
+                    --project "${CY_PROJECT}" \
+                    --env "${CY_ENV}" \
+                    --component "${CY_COMPONENT}" \
+                    --enabled
+                }
+
+                install_or_upgrade_plugin \
+                  "${PLUGIN_ADMINER_INSTALL_NAME}" \
+                  "${PLUGIN_ADMINER_NAME}" \
+                  "${PLUGIN_ADMINER_VERSION_ID}"
+                enable_on_component "${PLUGIN_ADMINER_INSTALL_NAME}"
+
+                PG_CONFIG=(
+                  --config "database_host=${DB_HOST}"
+                  --config "database_port=${DB_PORT}"
+                  --config "database_user=${DB_USER}"
+                  --config "database_password=${DB_PASSWORD}"
+                  --config "database_name=${DB_NAME}"
+                )
+                if [[ -n "${DB_SSL_SERVERNAME}" ]]; then
+                  PG_CONFIG+=(--config "database_ssl_servername=${DB_SSL_SERVERNAME}")
+                fi
+
+                install_or_upgrade_plugin \
+                  "${PLUGIN_PG_USERS_INSTALL_NAME}" \
+                  "${PLUGIN_PG_USERS_NAME}" \
+                  "${PLUGIN_PG_USERS_VERSION_ID}" \
+                  "${PG_CONFIG[@]}"
+                enable_on_component "${PLUGIN_PG_USERS_INSTALL_NAME}"
+
+                echo "Plugins registered and enabled on component ${CY_COMPONENT}"
+        params:
+          REGISTER_PLUGINS: '((register_plugins))'
+          PLUGIN_REGISTRY: '((plugin_registry))'
+          PLUGIN_ADMINER_NAME: '((plugin_adminer_name))'
+          PLUGIN_ADMINER_INSTALL_NAME: '((plugin_adminer_install_name))'
+          PLUGIN_ADMINER_VERSION_ID: '((plugin_adminer_version_id))'
+          PLUGIN_PG_USERS_NAME: '((plugin_postgresql_users_name))'
+          PLUGIN_PG_USERS_INSTALL_NAME: '((plugin_postgresql_users_install_name))'
+          PLUGIN_PG_USERS_VERSION_ID: '((plugin_postgresql_users_version_id))'
+          CY_API_KEY: ((cy_api_key))
+          CY_API_URL: ($ .api_url $)
+          CY_ORG: ($ .org $)
+          CY_PROJECT: ($ .project $)
+          CY_ENV: ($ .env $)
+          CY_COMPONENT: ($ .component $)
+
 
   - name: snapshot
     max_in_flight: 1
