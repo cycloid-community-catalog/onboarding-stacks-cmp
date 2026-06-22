@@ -98,5 +98,5 @@ config:
         destination: '($ .config_root $)/terraform/vmware/main.tf'
     ansible:
       playbook:
-        path: 'ansible/site.yml'
-        destination: '($ .config_root $)/ansible/site.yml'
+        path: 'ansible/environments/postgresql.yml.sample'
+        destination: '($ .config_root $)/ansible/environments/postgresql.yml'

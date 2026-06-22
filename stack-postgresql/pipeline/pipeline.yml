@@ -235,8 +235,6 @@ jobs:
           trigger: true
         - get: git_config-ansible
           trigger: true
-        - get: git_stack-terraform
-          trigger: true
         - get: tfstate
           trigger: true
           passed:
@@ -281,6 +279,9 @@ jobs:
             args:
               - '-ec'
               - |
+                set -a
+                [ -f ansible-playbook/env ] && source ansible-playbook/env
+                set +a
                 export ANSIBLE_STDOUT_CALLBACK=actionable
                 export ANSIBLE_FORCE_COLOR=1
                 export PYTHONUNBUFFERED=1
