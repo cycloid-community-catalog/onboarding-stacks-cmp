@@ -301,6 +301,7 @@ jobs:
           - name: merged-stack
             path: ansible-playbook
         params:
+          SSH_PRIVATE_KEY: ((($ .project $)-($ .env $)-postgresql-ssh.ssh_key))
           ANSIBLE_PLAYBOOK_PATH: ansible-playbook
           ANSIBLE_PLAYBOOK_NAME: site.yml
           ANSIBLE_EXTRA_VARS:

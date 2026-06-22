@@ -41,12 +41,6 @@ output "database_url" {
   sensitive   = true
 }
 
-output "ssh_private_key" {
-  description = "SSH private key to connect to the EC2 instance"
-  value       = tls_private_key.ssh.private_key_pem
-  sensitive   = true
-}
-
 output "public_network_access_enabled" {
   description = "PostgreSQL port 5432 is open to the public internet"
   value       = true

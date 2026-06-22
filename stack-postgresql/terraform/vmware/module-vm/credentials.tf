@@ -26,3 +26,15 @@ resource "cycloid_credential" "db" {
     password = random_password.db.result
   }
 }
+
+resource "cycloid_credential" "ssh" {
+  name                   = "${local.credential_slug}-ssh"
+  description            = "SSH Key Pair used in newly provisionned workloads."
+  path                   = "${local.credential_slug}-ssh"
+  canonical              = "${local.credential_slug}-ssh"
+
+  type = "ssh"
+  body = {
+    ssh_key = chomp(tls_private_key.ssh.private_key_openssh)
+  }
+}

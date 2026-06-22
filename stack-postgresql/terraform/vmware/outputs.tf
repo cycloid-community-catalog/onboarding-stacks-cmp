@@ -41,12 +41,6 @@ output "database_url" {
   sensitive   = true
 }
 
-output "ssh_private_key" {
-  description = "SSH private key to connect to the EC2 instance"
-  value       = module.vm.ssh_private_key
-  sensitive   = true
-}
-
 output "public_network_access_enabled" {
   description = "Whether PostgreSQL port 5432 is open to the public internet"
   value       = module.vm.public_network_access_enabled
