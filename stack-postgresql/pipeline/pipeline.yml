@@ -287,7 +287,6 @@ jobs:
                 export PYTHONUNBUFFERED=1
                 export ANSIBLE_REMOTE_USER="${ssh_user:-ubuntu}"
                 export ANSIBLE_EXTRA_ARGS="-i ${instance_public_ip},"
-                export SSH_PRIVATE_KEY="${ssh_private_key}"
                 echo "Targeting ${ssh_user}@${instance_public_ip}"
                 /usr/bin/ansible-runner
           caches:

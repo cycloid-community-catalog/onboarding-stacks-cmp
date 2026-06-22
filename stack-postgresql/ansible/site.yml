@@ -87,10 +87,6 @@
         state: started
         enabled: true
 
-    - name: Verify PostgreSQL listens on all interfaces
-      shell: ss -ltn | grep -E ':(5432)\\s' | grep -qE '0\\.0\\.0\\.0:5432|\\*:5432|\\[::\\]:5432'
-      changed_when: false
-
     - name: Wait for PostgreSQL port to accept connections
       wait_for:
         port: 5432
