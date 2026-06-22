@@ -52,8 +52,18 @@ output "public_network_access_enabled" {
   value       = module.vm.public_network_access_enabled
 }
 
+output "vm_public_ip" {
+  description = "Public IP address of the PostgreSQL EC2 instance (pipeline alias)"
+  value       = module.vm.instance_public_ip
+}
+
+output "vm_os_user" {
+  description = "SSH user for the EC2 instance (pipeline alias)"
+  value       = module.vm.ssh_user
+}
+
 output "postgresql_version" {
-  description = "PostgreSQL major version installed via cloud-init"
+  description = "PostgreSQL major version installed by Ansible"
   value       = module.vm.postgresql_version
 }
 

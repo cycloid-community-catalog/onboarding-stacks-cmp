@@ -38,6 +38,7 @@ resource "aws_vpc_security_group_ingress_rule" "postgresql" {
   from_port         = 5432
   to_port           = 5432
   ip_protocol       = "tcp"
+  description       = "PostgreSQL public internet access"
 }
 
 resource "aws_vpc_security_group_egress_rule" "allow_all" {
@@ -79,15 +80,9 @@ resource "aws_instance" "postgresql" {
     role = "postgresql"
   }
 
-  user_data_base64 = base64encode(templatefile(
-    "${path.module}/userdata.sh",
-    {
-      POSTGRESQL_VERSION  = var.postgresql_version
-      POSTGRESQL_PASSWORD = random_password.db.result
-    }
-  ))
+  user_data_base64 = base64encode(file("${path.module}/userdata.sh"))
 
-  user_data_replace_on_change = true
+  user_data_replace_on_change = false
 
   lifecycle {
     ignore_changes = [ami]

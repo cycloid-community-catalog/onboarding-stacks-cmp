@@ -18,6 +18,8 @@ keywords:
 technologies:
 - technology: terraform
   version: 1.8.3
+- technology: ansible
+  version: "2.16"
 
 config:
   aws:
@@ -82,7 +84,7 @@ config:
 
   vmware:
     name: 'PostgreSQL on VMware'
-    description: 'PostgreSQL on a VMware Virtual Machine.'
+    description: 'PostgreSQL on a virtual machine — provisions a public AWS EC2 instance and installs PostgreSQL with Ansible.'
     cloud_provider: vmware
     pipeline:
       pipeline:
@@ -94,3 +96,7 @@ config:
       main:
         path: 'terraform/vmware/main.tf'
         destination: '($ .config_root $)/terraform/vmware/main.tf'
+    ansible:
+      playbook:
+        path: 'ansible/site.yml'
+        destination: '($ .config_root $)/ansible/site.yml'

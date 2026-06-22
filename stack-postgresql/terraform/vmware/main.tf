@@ -19,6 +19,6 @@ module "vm" {
   volume_size = 20
 
   #. postgresql_version: '16'
-  #+ PostgreSQL major version installed via cloud-init
+  #+ PostgreSQL major version installed by Ansible
   postgresql_version = "16"
 }

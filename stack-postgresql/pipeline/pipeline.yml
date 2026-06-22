@@ -46,6 +46,7 @@ resources:
       clevercloud_secret: ($ .env_providers.clevercloud.secret $)
       clevercloud_organisation: ($ .env_providers.clevercloud.organisation $)
 ($ else if eq .use_case "vmware" $)
+      # Using AWS EC2 for infrastructure while we don't have a VMware lab yet. We will install PostgreSQL via Ansible.
       aws_access_key: ($ .env_providers.aws.access_key $)
       aws_secret_key: ($ .env_providers.aws.secret_key $)
       aws_region: ($ .env_vars.aws_region $)
@@ -93,11 +94,56 @@ resources:
     paths:
       - ($ .config_root $)/terraform/($ .use_case $)/*
 
+($ if eq .use_case "vmware" $)
+# The Ansible stack (will be merged with the config)
+- name: git_stack-ansible
+  type: git
+  icon: github-circle
+  source:
+    uri: ($ .scs_url $)
+    ($- if eq .stack_version_type "tag" $)
+    tag_filter: ($ .stack_version_ref $)
+    fetch_tags: true
+    ($- else $)
+    branch: ($ coalesce .stack_version_ref .catalog_repository_branch $)
+    ($- end $)
+    ($- if eq .scs_cred_type "basic_auth" $)
+    username: ((($ .scs_cred_path $).username))
+    password: ((($ .scs_cred_path $).password))
+    ($- end $)
+    ($- if eq .scs_cred_type "ssh" $)
+    private_key: ((($ .scs_cred_path $).ssh_key))
+    ($- end $)
+    ($- if ne .stack_version_type "tag" $)
+    paths:
+      - ($ .stack_path $)/ansible/*
+    ($- end $)
+
+# The Ansible config (will be merged with the stack)
+- name: git_config-ansible
+  type: git
+  icon: github-circle
+  source:
+    uri: ($ .cr_url $)
+    branch: ($ .cr_branch $)
+    ($- if eq .cr_cred_type "basic_auth" $)
+    username: ((($ .cr_cred_path $).username))
+    password: ((($ .cr_cred_path $).password))
+    ($- end $)
+    ($- if eq .cr_cred_type "ssh" $)
+    private_key: ((($ .cr_cred_path $).ssh_key))
+    ($- end $)
+    paths:
+      - ($ .config_root $)/ansible/environments/*
+($ end $)
 
 groups:
 - name: overview
   jobs:
     - deploy
+($ if eq .use_case "vmware" $)
+    - install-postgresql
+($ end $)
 
 - name: actions
   jobs:
@@ -178,6 +224,90 @@ jobs:
           CY_PROJECT: ($ .project $)
           CY_ENV: ($ .env $)
           CY_COMPONENT: ($ .component $)
+
+($ if eq .use_case "vmware" $)
+  - name: install-postgresql
+    serial: true
+    build_logs_to_retain: 10
+    plan:
+      - in_parallel:
+        - get: git_stack-ansible
+          trigger: true
+        - get: git_config-ansible
+          trigger: true
+        - get: git_stack-terraform
+          trigger: true
+        - get: tfstate
+          trigger: true
+          passed:
+            - deploy
+
+      - task: merge-stack-and-config
+        config:
+          platform: linux
+          image_resource:
+            type: registry-image
+            source:
+              repository: cycloid/cycloid-toolkit
+              tag: latest
+          run:
+            path: /usr/bin/merge-stack-and-config
+          inputs:
+          - name: git_config-ansible
+            path: "config"
+          - name: git_stack-ansible
+            path: "stack"
+          - name: tfstate
+            path: "terraform"
+          outputs:
+          - name: merged-stack
+            path: "merged-stack"
+          - name: output-var
+            path: "output-var"
+        params:
+          CONFIG_PATH: ($ .config_root $)/ansible/environments
+          STACK_PATH: ($ .stack_path $)/ansible
+
+      - task: run-ansible
+        config:
+          platform: linux
+          image_resource:
+            type: registry-image
+            source:
+              repository: cycloid/cycloid-toolkit
+              tag: ((ansible_version))
+          run:
+            path: /bin/bash
+            args:
+              - '-ec'
+              - |
+                export ANSIBLE_STDOUT_CALLBACK=actionable
+                export ANSIBLE_FORCE_COLOR=1
+                export PYTHONUNBUFFERED=1
+                export ANSIBLE_REMOTE_USER="${ssh_user:-ubuntu}"
+                export ANSIBLE_EXTRA_ARGS="-i ${instance_public_ip},"
+                export SSH_PRIVATE_KEY="${ssh_private_key}"
+                echo "Targeting ${ssh_user}@${instance_public_ip}"
+                /usr/bin/ansible-runner
+          caches:
+            - path: ansible-playbook/roles
+          inputs:
+          - name: merged-stack
+            path: ansible-playbook
+          - name: output-var
+            path: output-var
+          outputs:
+          - name: merged-stack
+            path: ansible-playbook
+        params:
+          ANSIBLE_PLAYBOOK_PATH: ansible-playbook
+          ANSIBLE_PLAYBOOK_NAME: site.yml
+          ANSIBLE_EXTRA_VARS:
+            cy_org: ($ .org $)
+            cy_project: ($ .project $)
+            cy_env: ($ .env $)
+            cy_component: ($ .component $)
+($ end $)
 
 
   - name: snapshot

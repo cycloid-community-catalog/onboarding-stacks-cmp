@@ -96,7 +96,7 @@ The VMware use case provisions an **AWS EC2** instance with Terraform and instal
 - `env_providers.aws.access_key` / `env_providers.aws.secret_key`: from the attached AWS Cloud Account
 - `env_vars.aws_region`: AWS region for EC2 deployment
 
-PostgreSQL port **5432** is open to the public internet (`0.0.0.0/0`).
+PostgreSQL port **5432** is open to the public internet (`0.0.0.0/0`). PostgreSQL is installed and configured by Ansible (`listen_addresses = '*'`, remote `pg_hba` rules).
 
 ### VMware StackForms
 - `instance_type`: EC2 instance type (default: t3.micro)

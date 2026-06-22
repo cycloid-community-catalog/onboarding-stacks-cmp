@@ -1,0 +1,118 @@
+---
+- name: Install PostgreSQL
+  hosts: all
+  become: true
+
+  vars_files:
+    - "environments/default.yml"
+    - ["environments/postgresql.yml", "environments/empty.yml"]
+
+  vars:
+    postgresql_conf: "/etc/postgresql/{{ postgresql_version }}/main/postgresql.conf"
+    postgresql_hba: "/etc/postgresql/{{ postgresql_version }}/main/pg_hba.conf"
+
+  tasks:
+    - name: Install prerequisites
+      apt:
+        name:
+          - ca-certificates
+          - curl
+          - gnupg
+          - lsb-release
+        state: present
+        update_cache: true
+
+    - name: Add PostgreSQL apt key
+      apt_key:
+        url: https://www.postgresql.org/media/keys/ACCC4CF8.asc
+        state: present
+
+    - name: Add PostgreSQL apt repository
+      apt_repository:
+        repo: "deb http://apt.postgresql.org/pub/repos/apt {{ ansible_distribution_release }}-pgdg main"
+        state: present
+        filename: pgdg
+
+    - name: Install PostgreSQL
+      apt:
+        name:
+          - "postgresql-{{ postgresql_version }}"
+          - "postgresql-client-{{ postgresql_version }}"
+        state: present
+        update_cache: true
+
+    - name: Configure listen_addresses for public access
+      lineinfile:
+        path: "{{ postgresql_conf }}"
+        regexp: "^#?listen_addresses\\s*="
+        line: "listen_addresses = '*'"
+      notify: Restart PostgreSQL
+
+    - name: Ensure PostgreSQL listens on port 5432
+      lineinfile:
+        path: "{{ postgresql_conf }}"
+        regexp: "^#?port\\s*="
+        line: "port = 5432"
+      notify: Restart PostgreSQL
+
+    - name: Allow remote IPv4 connections
+      lineinfile:
+        path: "{{ postgresql_hba }}"
+        regexp: "^host\\s+all\\s+all\\s+0\\.0\\.0\\.0/0\\s+scram-sha-256"
+        line: "host    all    all    0.0.0.0/0    scram-sha-256"
+        insertafter: EOF
+      notify: Restart PostgreSQL
+
+    - name: Allow remote IPv6 connections
+      lineinfile:
+        path: "{{ postgresql_hba }}"
+        regexp: "^host\\s+all\\s+all\\s+::/0\\s+scram-sha-256"
+        line: "host    all    all    ::/0         scram-sha-256"
+        insertafter: EOF
+      notify: Restart PostgreSQL
+
+    - name: Check if ufw is active
+      command: ufw status
+      register: ufw_status
+      changed_when: false
+      failed_when: false
+
+    - name: Allow PostgreSQL through ufw
+      ufw:
+        rule: allow
+        port: "5432"
+        proto: tcp
+      when: ufw_status.stdout is search('Status: active')
+
+    - name: Apply PostgreSQL configuration changes
+      meta: flush_handlers
+
+    - name: Set postgres user password
+      become_user: postgres
+      shell: >-
+        psql -c "ALTER USER postgres WITH PASSWORD '{{ database_password }}';"
+      changed_when: true
+      no_log: true
+
+    - name: Ensure PostgreSQL is started
+      service:
+        name: postgresql
+        state: started
+        enabled: true
+
+    - name: Verify PostgreSQL listens on all interfaces
+      shell: ss -ltn | grep -E ':(5432)\\s' | grep -qE '0\\.0\\.0\\.0:5432|\\*:5432|\\[::\\]:5432'
+      changed_when: false
+
+    - name: Wait for PostgreSQL port to accept connections
+      wait_for:
+        port: 5432
+        host: "{{ ansible_default_ipv4.address }}"
+        delay: 2
+        timeout: 60
+
+  handlers:
+    - name: Restart PostgreSQL
+      service:
+        name: postgresql
+        state: restarted

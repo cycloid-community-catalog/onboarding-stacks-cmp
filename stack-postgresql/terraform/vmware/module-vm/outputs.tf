@@ -53,7 +53,7 @@ output "public_network_access_enabled" {
 }
 
 output "postgresql_version" {
-  description = "PostgreSQL major version installed via cloud-init"
+  description = "PostgreSQL major version installed by Ansible"
   value       = var.postgresql_version
 }
 

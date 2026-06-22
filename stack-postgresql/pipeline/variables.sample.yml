@@ -43,6 +43,10 @@ cy_api_key: ((admin-api-key.key))
 #+ terraform version used to execute your code.
 terraform_version: '1.8.3'
 
+#. ansible_version (optional): 'v8.3'
+#+ cycloid-toolkit image tag for the VMware Ansible install-postgresql job.
+ansible_version: 'v8.3'
+
 #
 # Plugin registration (after Terraform deploy)
 #
