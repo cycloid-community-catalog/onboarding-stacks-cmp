@@ -71,19 +71,6 @@
         insertafter: EOF
       notify: Restart PostgreSQL
 
-    - name: Check if ufw is active
-      command: ufw status
-      register: ufw_status
-      changed_when: false
-      failed_when: false
-
-    - name: Allow PostgreSQL through ufw
-      ufw:
-        rule: allow
-        port: "5432"
-        proto: tcp
-      when: ufw_status.stdout is search('Status: active')
-
     - name: Apply PostgreSQL configuration changes
       meta: flush_handlers
 
