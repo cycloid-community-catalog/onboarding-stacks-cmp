@@ -249,6 +249,7 @@ for key in database_host database_port database_user database_password database_
   fi
 done
 
+DB_URL="$(jq -r .database_url "${METADATA}")"
 DB_HOST="$(jq -r .database_host "${METADATA}")"
 DB_PORT="$(jq -r .database_port "${METADATA}")"
 DB_USER="$(jq -r .database_user "${METADATA}")"
@@ -276,6 +277,7 @@ ADMINER_INSTALL_REF="$(install_or_upgrade_plugin \
 enable_on_component "${ADMINER_INSTALL_REF}" || exit 1
 
 PG_CONFIG=(
+  --config "database_url=${DB_URL}"
   --config "database_host=${DB_HOST}"
   --config "database_port=${DB_PORT}"
   --config "database_user=${DB_USER}"
