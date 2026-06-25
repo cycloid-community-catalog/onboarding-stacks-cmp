@@ -375,8 +375,8 @@ use_cases:
         description: "Clever Cloud region where the add-on is provisioned."
         key: region
         widget: dropdown
-        type: string
-        default: "par"
+        type: map
+        default: "Paris (Clever Cloud)"
         values:
           - {"label": "Paris (Clever Cloud)", "value": "par"}
           - {"label": "Roubaix (OVHcloud)", "value": "rbx"}
