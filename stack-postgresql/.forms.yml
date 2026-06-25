@@ -378,14 +378,14 @@ use_cases:
         type: string
         default: "par"
         values:
-          - "par"
-          - "rbx"
-          - "mtl"
-          - "ldn"
-          - "wsw"
-          - "sgp"
-          - "syd"
-          - "scw"
+          - {"label": "Paris (Clever Cloud)", "value": "par"}
+          - {"label": "Roubaix (OVHcloud)", "value": "rbx"}
+          - {"label": "Montreal (OVHcloud)", "value": "mtl"}
+          - {"label": "London (IONOS)", "value": "ldn"}
+          - {"label": "Warsaw (OVHcloud)", "value": "wsw"}
+          - {"label": "Singapore (OVHcloud)", "value": "sgp"}
+          - {"label": "Sydney (OVHcloud)", "value": "syd"}
+          - {"label": "Paris — Scaleway DC5 (Scaleway)", "value": "scw"}
         required: true
       - name: "PostgreSQL Version"
         description: "PostgreSQL major version (optional — leave empty for the provider default)."
